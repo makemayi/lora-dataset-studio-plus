@@ -45,6 +45,9 @@ export const FLAG_PREREQ = {
   low_aesthetic: 'score',
   nsfw: 'score',
   watermark: 'watermark',
+  // 👥 Group by person wrote the n_faces column the flag reads; a bank it has
+  // never run on matches nothing and the 0 means "not measured yet".
+  multi_person: 'faces',
 }
 
 /** The gesture that unblocks each prerequisite, in the app's own button names. */
@@ -53,6 +56,7 @@ export const FLAG_PREREQ_TEXT = {
   provenance: 'run 🔎 Rescan first — this bank was scanned before the pass that measures it',
   score: 'run ✨ Score first — nothing here has been scored yet',
   watermark: 'run 🚩 Find watermarks first — nothing here has been checked yet',
+  faces: 'run 👥 Group by person first — faces here have not been counted yet',
 }
 
 /** How many images the pass behind `kind` has reached in this bank.
@@ -63,6 +67,7 @@ function coverage(kind, counts, originMeasured) {
   if (kind === 'provenance') return originMeasured || 0
   if (kind === 'score') return counts?.scored || 0
   if (kind === 'watermark') return counts?.watermark_scanned || 0
+  if (kind === 'faces') return counts?.faces_scanned || 0
   return 1
 }
 

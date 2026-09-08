@@ -144,12 +144,15 @@ const FLAG_LABEL = {
   ...PROVENANCE_FLAG_LABEL,
   // V2 scoring flags (aesthetic · NSFW · watermark passes).
   low_aesthetic: '💔 Low aesthetic', nsfw: '🔞 NSFW', watermark: '🚩 Watermark',
+  multi_person: '👥👥 Multi-person',
 }
 const FLAG_HINT = {
   soft_detail: 'The picture stops before the pixels do — usually an enlargement. '
     + 'A soft or out-of-focus shot reads the same, so check before mass-rejecting.',
   bars: 'Flat black letterbox/pillarbox bars — video screenshots and padded stills. '
     + 'A dark-themed screenshot reads the same, so check before mass-rejecting.',
+  multi_person: 'Flips KEPT images too, not just undecided ones. The detector '
+    + 'can miss a small or background face — glance at the pile before confirming.',
 }
 // These two are measurements of PROVENANCE, not quality verdicts, which is why
 // the overnight pipeline does not offer them (backend PIPELINE_REJECT_FLAGS) and
@@ -157,8 +160,15 @@ const FLAG_HINT = {
 // tooltip. Here you can see the count, undo, and look at the pile first.
 // Quality flags the CPU scan produces vs the ones the ML scoring/watermark
 // passes add — auto-reject only offers a flag whose pass has actually run.
+// multi_person is a third kind: an identity measurement the operator explicitly
+// wants in this panel (2026-09-08), gated on the 👥 pass, flips keeps too.
 const QUALITY_REJECT_FLAGS = ['blur', 'noise', 'uniform', 'small', 'soft_detail', 'bars']
 const SCORE_REJECT_FLAGS = ['low_aesthetic', 'nsfw', 'watermark']
+// Identity provenance (👥 Group by person pass): a multi-person photo is
+// unwanted as LoRA dataset material, full stop, and the operator asked for it
+// to go in one click — pending AND kept rows both flip (2026-09-08). Offered
+// only once that pass has measured the bank, same gate as the grid chip.
+const PROVENANCE_REJECT_FLAGS = ['multi_person']
 // Resolution tiers — ids + labels MUST mirror backend _RES_BUCKETS (order and
 // megapixel bands). Rendered as a dedicated chip row so a mixed dump can be
 // sliced by resolution and mass-acted one tier at a time.
@@ -2123,6 +2133,9 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
   // Score flags only make sense once their pass ran; watermark is its own pass.
   const availableScoreFlags = SCORE_REJECT_FLAGS.filter(
     (f) => (f === 'watermark' ? watermarkScanned : scored) > 0)
+  // Same gate as the grid's 👥👥 chip: the 👥 pass must have measured the bank.
+  const availableProvenanceFlags = PROVENANCE_REJECT_FLAGS.filter(
+    (f) => (counts?.faces_scanned || 0) > 0)
   // 🧹 Auto-reject readiness. The never-scanned pile is unreachable by EVERY
   // quality flag (they are all gated on quality_state=='ok'), so the popover
   // says so and names the gesture; the per-flag numbers below come from
@@ -2875,7 +2888,8 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
                     and bars are provenance HINTS, not verdicts, and this is the one
                     screen that offers to act on them in bulk. A tooltip is invisible
                     on a phone and to anyone who does not hover. */}
-                {[...QUALITY_REJECT_FLAGS, ...availableScoreFlags].map((f) => {
+                {[...QUALITY_REJECT_FLAGS, ...availableScoreFlags,
+                  ...availableProvenanceFlags].map((f) => {
                   // A 0 has two opposite meanings and used to render identically:
                   // "nothing left to reject" (clean) vs "this flag's pass never
                   // ran, so it cannot catch anything" (a missing prerequisite).

@@ -152,3 +152,23 @@ test('Launch all admits its counts move, because the scan runs first', () => {
   // Nothing to warn about on a fully scanned bank.
   assert.equal(launchRejectNote({ total: 10, unscanned: 0 }, true), null);
 });
+
+test('multi_person is offered behind the 👥 pass and says so when it never ran', () => {
+  // The prerequisite wiring: the flag reads n_faces, which only the
+  // 👥 Group by person pass writes. A bank it never ran on must show the
+  // "run it first" sentence, not a lying 0.
+  assert.equal(FLAG_PREREQ.multi_person, 'faces');
+  const blocked = flagPrereq('multi_person', { faces_scanned: 0 }, 0);
+  assert.match(blocked, /Group by person/);
+  assert.equal(flagPrereq('multi_person', { faces_scanned: 1445 }, 0), null);
+  // The checkbox renders the shared candidate label like every other flag.
+  assert.match(ws, /flagCandidateLabel\(f, flagsActionable\)/);
+  // The workspace gates the offer on the same measurement...
+  assert.match(ws, /const PROVENANCE_REJECT_FLAGS = \['multi_person'\]/);
+  assert.match(ws, /availableProvenanceFlags = PROVENANCE_REJECT_FLAGS\.filter\(/);
+  assert.match(ws, /\(counts\?\.faces_scanned \|\| 0\) > 0/);
+  // ...feeds it into the panel's checkbox list...
+  assert.match(ws, /\.\.\.availableProvenanceFlags\]\.map\(\(f\) => \{/);
+  // ...and labels it.
+  assert.match(ws, /multi_person: '👥👥 Multi-person'/);
+});

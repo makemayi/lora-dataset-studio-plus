@@ -1180,6 +1180,10 @@ def image_flags(row: BankImage, th: dict) -> list:
     if (row.watermark_state == 'detected'
             and not _watermark_history_inactive(row)):
         flags.append('watermark')
+    # Identity provenance (👥 Group by person pass) — NULL = not measured, which
+    # must never read as "single person".
+    if row.n_faces is not None and row.n_faces > 1:
+        flags.append('multi_person')
     return flags
 
 
@@ -1300,6 +1304,11 @@ def _flag_filter(flag: str, th: dict):
     """SQLAlchemy criterion for one flag name (mirrors image_flags)."""
     if flag == 'unreadable':
         return BankImage.quality_state == 'unreadable'
+    # Identity provenance — same predicate as the grid's multi-person chip.
+    # NULL-safe by SQL: an unmeasured row (the ⤢ pass never ran) compares
+    # NULL > 1 and simply never matches.
+    if flag == 'multi_person':
+        return BankImage.n_faces > 1
     # V2 scoring flags — not gated on quality_state (see image_flags) and only
     # true where the score actually exists (a NULL score is "not scored", never
     # "below threshold"). watermark is a discrete state, no threshold column.
@@ -1335,6 +1344,13 @@ _QUALITY_FLAGS = ('blur', 'noise', 'uniform', 'small', 'soft_detail', 'bars',
 # "clean" quality aggregate stays about the CPU quality pass, while these count
 # and filter independently (each only meaningful once its pass has run).
 _SCORE_FLAGS = ('low_aesthetic', 'nsfw', 'watermark')
+# Identity provenance — measured by the 👥 Group by person pass, offered as a
+# 🧹 Auto-reject flag ON PURPOSE (2026-09-08: multi-person photos are unwanted
+# as LoRA dataset material, full stop, and the operator asked for them to go in
+# one click — keeps included). A third tuple, not folded into _QUALITY_FLAGS:
+# the flagged/clean quality aggregates and their worst-first ordering map must
+# not see a flag whose criterion reads a different column.
+_PROVENANCE_FLAGS = ('multi_person',)
 
 # Resolution tiers for the Bank grid — bucketed on MEGAPIXELS (width×height, the
 # same rank as the resolution sort) so a mixed dump can be skimmed and mass-acted
@@ -1694,19 +1710,24 @@ def _flag_counts(bank_id, th) -> tuple[dict, dict]:
     One query per flag, not two: the pending half rides along as a conditional
     SUM, so telling the truth costs nothing extra on a 100 000-image bank."""
     flags, actionable = {}, {}
-    for flag in _QUALITY_FLAGS + _SCORE_FLAGS:
+    for flag in _QUALITY_FLAGS + _SCORE_FLAGS + _PROVENANCE_FLAGS:
         crit = _flag_filter(flag, th)
         if crit is None:
             flags[flag] = actionable[flag] = 0
             continue
-        total, pending = (
+        # A provenance flag's click flips pending AND keep (never reject), so
+        # its actionable half is "not yet rejected" — a different conditional
+        # from the pending-only one the other flags contract to.
+        decided = (BankImage.status == 'reject' if flag in _PROVENANCE_FLAGS
+                   else BankImage.status != 'pending')
+        total, not_decided = (
             db.session.query(
                 func.count(BankImage.id),
                 func.coalesce(
-                    func.sum(case((BankImage.status == 'pending', 1), else_=0)), 0))
+                    func.sum(case((decided, 0), else_=1)), 0))
             .filter(BankImage.bank_id == bank_id).filter(crit).one())
         flags[flag] = int(total or 0)
-        actionable[flag] = int(pending or 0)
+        actionable[flag] = int(not_decided or 0)
     return flags, actionable
 
 
@@ -1979,6 +2000,10 @@ def bank_payload(user_id, bank_id) -> dict | None:
     counts['semantic_ready'] = bool(semantic and semantic['ready'])
     counts['semantic_indexed'] = int(
         semantic['counts']['ok'] if semantic else 0)
+    # The 🧹 Auto-reject panel's multi-person readiness check reads it from
+    # here (same shape as scanned/scored above): the 👥 pass must have run
+    # before the flag can match anything.
+    counts['faces_scanned'] = faces_scanned
     return {
         'id': bank.id, 'name': bank.name, 'source_path': bank.source_path,
         'semantic_engine': (semantic['engine'] if semantic else
@@ -4343,13 +4368,21 @@ def apply_flags(user_id, bank_id, flags, snapshot=None, *,
     th = thresholds()
     out = {}
     for flag in flags or []:
-        if flag not in _QUALITY_FLAGS + _SCORE_FLAGS:
+        provenance = flag in _PROVENANCE_FLAGS
+        if flag not in _QUALITY_FLAGS + _SCORE_FLAGS + _PROVENANCE_FLAGS:
             continue
         crit = _flag_filter(flag, th)
         if crit is None:
             continue
-        rows = (BankImage.query.filter_by(bank_id=bank_id, status='pending')
-                .filter(crit).all())
+        q = BankImage.query.filter_by(bank_id=bank_id)
+        if provenance:
+            # A multi-person photo is unwanted whatever the user decided earlier:
+            # pending AND keep flip (the operator asked for keeps included);
+            # already-rejected rows stay as they are.
+            q = q.filter(BankImage.status != 'reject')
+        else:
+            q = q.filter(BankImage.status == 'pending')
+        rows = q.filter(crit).all()
         for r in rows:
             snapshot.note(r, 'reject', flag)
             r.status, r.reject_reason = 'reject', flag

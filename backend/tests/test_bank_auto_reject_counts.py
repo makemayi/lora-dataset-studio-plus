@@ -164,3 +164,44 @@ def test_the_preview_endpoint_answers_both_questions_too(client, tmp_path):
     payload = _payload(client, bank_id)
     assert set(preview['flags_actionable']) == set(payload['flags_actionable'])
     assert preview['flags_actionable'] == payload['flags_actionable']
+
+
+def test_multi_person_flips_keeps_and_skips_unmeasured(app, client, tmp_path):
+    """👥👥 Multi-person is the ONE flag that overrides a manual keep — the
+    operator asked for multi-person photos to go in one click, whatever was
+    decided earlier (2026-09-08). Unmeasured rows (NULL n_faces) are never
+    matched, already-rejected rows stay as they are, and the panel's count
+    tells this truth: actionable counts everything the click will flip."""
+    from app.extensions import db
+    from app.models import BankImage
+
+    bank_id, _src = _mkbank(client, tmp_path, {
+        'a.png': checkerboard(), 'b.png': checkerboard(),
+        'c.png': checkerboard(), 'd.png': checkerboard()})
+    with app.app_context():
+        rows = BankImage.query.filter_by(bank_id=bank_id) \
+            .order_by(BankImage.id).all()
+        rows[0].n_faces = 2      # pending multi-person — flips
+        rows[1].n_faces = 3      # KEPT multi-person — flips too
+        rows[2].n_faces = 1      # single face — untouched at any status
+        rows[3].n_faces = None   # unmeasured — never matched
+        db.session.commit()
+        rid = [r.id for r in rows]
+    _set_status(client, bank_id, [rid[1]], 'keep')
+
+    payload = _payload(client, bank_id)
+    assert payload['flags']['multi_person'] == 2
+    assert payload['flags_actionable']['multi_person'] == 2
+
+    assert _apply(client, bank_id, ['multi_person']) == 2
+
+    with app.app_context():
+        st = {r.id: (r.status, r.reject_reason)
+              for r in BankImage.query.filter_by(bank_id=bank_id).all()}
+    assert st[rid[0]] == ('reject', 'multi_person')
+    assert st[rid[1]] == ('reject', 'multi_person')   # the kept one flipped
+    assert st[rid[2]][0] == 'pending'                 # single face untouched
+    assert st[rid[3]][0] == 'pending'                 # unmeasured untouched
+    after = _payload(client, bank_id)
+    assert after['flags']['multi_person'] == 2            # facet keeps its number
+    assert after['flags_actionable']['multi_person'] == 0

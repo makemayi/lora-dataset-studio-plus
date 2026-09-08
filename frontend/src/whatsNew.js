@@ -50,6 +50,15 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-09-08-multi-person-auto-reject',
+    date: '2026-09-08',
+    title: 'One click clears every multi-person photo from a bank',
+    blurb: 'The 🧹 Auto-reject panel now offers 👥👥 Multi-person once the '
+      + 'Group by person pass has run: one tick rejects them all — kept ones '
+      + 'included — instead of hunting them cluster by cluster. Reversible, '
+      + 'and promotion was already skipping them anyway.'
+  },
+  {
     id: '2026-09-08-topaz-batch-gpu-busy-retry',
     date: '2026-09-08',
     title: 'Build\'s auto-upscale no longer dies when ComfyUI is slow to free the GPU',
