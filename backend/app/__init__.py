@@ -350,6 +350,9 @@ _SCHEMA_ADDITIONS = (
     ('bank_image', 'medium', 'VARCHAR(16)'),
     ('bank_image', 'medium_margin', 'REAL'),
     ('bank_image', 'face_yaw', 'REAL'),
+    # Face COUNT for the multi-person promotion exclusion (2026-09-07). NULL =
+    # unmeasured stays promotable — the plan and the clause agree on that.
+    ('bank_image', 'n_faces', 'INTEGER'),
     # Exact-byte authority shared by every Bank analysis lane.  Existing rows
     # stay NULL and enter the explicit legacy compatibility path until a pass
     # re-attests them; inventing a backfill hash would falsely bless stale data.
