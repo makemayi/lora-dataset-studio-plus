@@ -9832,6 +9832,22 @@ def _single_person_clause():
     return (BankImage.n_faces.is_(None) | (BankImage.n_faces <= 1))
 
 
+def _row_angle(row):
+    """The python twin of _angle_case(): the same bucket the facets and chips
+    would show, computed for the allocation. None = not measured — the
+    allocator parks those last instead of guessing."""
+    if row.face_yaw is not None:
+        yaw = abs(row.face_yaw)
+        if yaw < ANGLE_FRONTAL_MAX:
+            return 'frontal'
+        if yaw < ANGLE_PROFILE_MIN:
+            return 'three_quarter'
+        return 'profile'
+    if row.face_state == 'no_face' and row.framing == 'back':
+        return 'behind'
+    return None
+
+
 def _promotable_query(bank_id, dataset_id):
     """The KEPT images eligible to promote into ``dataset_id``. Per-target, not a
     global 'promoted anywhere' lock — an image promoted to dataset A stays
@@ -11608,7 +11624,8 @@ def promotion_plan(user_id, bank_id, dataset_id, quotas, ids=None):
         rows,
         key=lambda r: (-(r.aesthetic_score or 0.0), -(r.blur_score or 0.0), r.id))
     pictures = [{'id': r.id,
-                 'has_face_box': r.face_state in ('scorable', None)}
+                 'has_face_box': r.face_state in ('scorable', None),
+                 'angle': _row_angle(r)}
                 for r in ranked]
     out = promotion_quota.allocate(pictures, quotas or {})
     return {
@@ -11878,7 +11895,14 @@ def _promote_job(user_id, bank_id, ids, dataset_id, activity_token=None,
         if multi_skipped:
             rows = [row for row in rows
                     if row.n_faces is None or row.n_faces <= 1]
+        # Angle round-robin instead of a bare id sort: when quotas cap a
+        # framing, WHICH pictures survive the cap follows the head-angle mix —
+        # the same interleave the plan's allocator uses. The id sort stays:
+        # it is what keeps a bucket's internal order stable.
         rows.sort(key=lambda r: r.id)
+        from . import promotion_quota as _pq
+        keyed = [{'row': row, 'angle': _row_angle(row)} for row in rows]
+        rows = [kv['row'] for kv in _pq.interleave_by_angle(keyed)]
         already_present = len(existing_source_ids)
         bank_jobs.progress(
             job, done=already_present, total=already_present + len(rows),

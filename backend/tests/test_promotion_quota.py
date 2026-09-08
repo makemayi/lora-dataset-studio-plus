@@ -66,3 +66,23 @@ def test_the_split_tracks_the_requested_ratio_while_the_pool_lasts():
 def test_a_zero_quota_is_not_a_framing_and_an_empty_pool_is_not_a_crash():
     assert allocate([], {'face': 1})['counts'] == {}
     assert allocate(_pics(3), {})['assignments'] == []
+
+
+def test_the_walk_round_robins_the_angle_buckets_when_caps_bite():
+    # Four pictures, two per angle, quota for two full frames: the interleave
+    # spends the caps on one picture PER ANGLE instead of both on whoever
+    # ranked first. Unmeasured pictures keep their order, last.
+    pics = [{'id': 1, 'has_face_box': True, 'angle': 'frontal'},
+            {'id': 2, 'has_face_box': True, 'angle': 'frontal'},
+            {'id': 3, 'has_face_box': True, 'angle': 'profile'},
+            {'id': 4, 'has_face_box': True, 'angle': 'profile'}]
+    out = allocate(pics, {'full': 2})
+    chosen = [pid for pid, f in out['assignments']]
+    assert chosen == [1, 3], 'one frontal and one profile, not two frontals'
+
+
+def test_pictures_without_an_angle_keep_their_original_order():
+    # The pre-angle contract: no 'angle' keys means the interleave is invisible.
+    pics = _pics(6)
+    out = allocate(pics, {'full': 3})
+    assert [pid for pid, _f in out['assignments']] == [1, 2, 3]

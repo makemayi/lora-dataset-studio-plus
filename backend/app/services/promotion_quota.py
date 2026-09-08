@@ -12,6 +12,37 @@ promised something the run then did not do would be worse than no plan at all.
 # starved, and it is the order a reused picture offers its remaining framings.
 FRAMINGS = ('face', 'half', 'full')
 
+# The bank's head-angle facet buckets. A build that spends its quotas on
+# whatever ranked first trains a LoRA that has seen one angle; walking the
+# buckets ROUND-ROBIN spends the same quotas across the head angles instead.
+# Unmeasured rows (no 'angle', or None) go LAST: a measurement the app holds
+# must inform the mix, and an absent one must not block it.
+ANGLE_BUCKETS = ('frontal', 'three_quarter', 'profile', 'behind')
+
+
+def interleave_by_angle(pictures):
+    """Round-robin the pictures over their angle buckets, rank kept within a
+    bucket, unmeasured last (original order). A list with no 'angle' keys is
+    returned in its original order — the interleave is invisible to callers
+    that cannot measure angles."""
+    buckets = {a: [] for a in ANGLE_BUCKETS}
+    unmeasured = []
+    for p in pictures:
+        bucket = buckets.get(p.get('angle'))
+        if bucket is None:
+            unmeasured.append(p)
+        else:
+            bucket.append(p)
+    groups = [buckets[a] for a in ANGLE_BUCKETS] + [unmeasured]
+    out = []
+    i = 0
+    while any(groups):
+        g = groups[i % len(groups)]
+        if g:
+            out.append(g.pop(0))
+        i += 1
+    return out
+
 
 def _allowed(picture, remaining, already_given):
     if not picture.get('has_face_box'):
@@ -23,9 +54,12 @@ def _allowed(picture, remaining, already_given):
 
 
 def allocate(pictures, quotas):
-    """Assign framings to pictures, best-ranked first.
+    """Assign framings to pictures, best-ranked first within an angle bucket.
 
-    ``pictures``: ``[{'id': int, 'has_face_box': bool}]`` ranked best first.
+    ``pictures``: ``[{'id': int, 'has_face_box': bool, 'angle': str|None}]``
+    ranked best first. The optional ``angle`` (the bank's head-angle facet)
+    round-robins the walk across buckets so the spent quotas spread over the
+    head angles; pictures without one keep their relative order, last.
     ``quotas``:   ``{'face': int, 'half': int, 'full': int}`` — a missing or
                   zero entry means that framing is not wanted at all.
 
@@ -35,6 +69,10 @@ def allocate(pictures, quotas):
     """
     remaining = {f: int(quotas.get(f) or 0) for f in FRAMINGS}
     remaining = {f: n for f, n in remaining.items() if n > 0}
+    # Pass 1 walks the buckets round-robin (see interleave_by_angle): when the
+    # caps later bite, the pictures that survive follow the head-angle mix
+    # instead of whoever's aesthetic score ranked first.
+    pictures = interleave_by_angle(pictures)
     counts = {}
     given = {}                                   # picture id -> [framing, ...]
     assignments = []
