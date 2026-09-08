@@ -2304,6 +2304,10 @@ def _apply_facets(q, th, skip=None, *, status=None, flag=None, cluster=None,
         # face; lumping them in here surfaced photos with visible faces under a
         # "No face" chip. 'unreadable'/'error' are read failures, not "no face".
         q = q.filter(BankImage.face_state == 'no_face')
+    elif flag == 'multi_person':
+        # Two or more faces — what the promotion excludes. NULL (unmeasured)
+        # never matches: a NULL comparison in SQL is not true.
+        q = q.filter(BankImage.n_faces > 1)
     elif flag in _QUALITY_FLAGS:
         crit = _flag_filter(flag, th)
         if crit is not None:
@@ -4468,6 +4472,8 @@ def _pool_query(bank_id, th, *, status=None, flag=None, cluster=None,
         q = q.filter(BankImage.semantic_dup_group.isnot(None))
     elif flag == 'no_face':
         q = q.filter(BankImage.face_state == 'no_face')
+    elif flag == 'multi_person':
+        q = q.filter(BankImage.n_faces > 1)
     elif flag in _QUALITY_FLAGS + _SCORE_FLAGS:
         crit = _flag_filter(flag, th)
         if crit is not None:
@@ -6054,6 +6060,11 @@ def _faces_job(bank_id, angles_only=False, statuses=None, ids=None):
             yaw = res.get('yaw')
             if yaw is not None:
                 row.face_yaw = float(yaw)
+            # Same write-whenever-measured rule as the yaw above: the ⤢
+            # backfill runs in angles-only mode and must still land counts.
+            nf = res.get('n_faces')
+            if nf is not None:
+                row.n_faces = int(nf)
             if not angles_only:
                 row.face_state = res.get('state')
                 row.face_det = res.get('det')
@@ -9813,13 +9824,24 @@ def _not_already_on(dataset_id):
                     BankImage.promoted_dataset_id != dataset_id))
 
 
+def _single_person_clause():
+    """NULL-safe multi-person exclusion: a row the faces pass never measured
+    (pass not run, or a pre-column row) stays promotable — the same honesty as
+    the plan's 'unscored counts as capable', because the promote-time detector
+    still falls those rows back to their full frame."""
+    return (BankImage.n_faces.is_(None) | (BankImage.n_faces <= 1))
+
+
 def _promotable_query(bank_id, dataset_id):
     """The KEPT images eligible to promote into ``dataset_id``. Per-target, not a
     global 'promoted anywhere' lock — an image promoted to dataset A stays
     promotable to B. (The dataset-side perceptual dedup on import is the real
-    guard against genuine duplicates.)"""
+    guard against genuine duplicates.) Multi-person pictures are excluded —
+    the dataset trains one subject — and the plan reports how many fell to
+    this rule as ``multi_person``, so the shrink is never silent."""
     return (BankImage.query.filter_by(bank_id=bank_id, status='keep')
-            .filter(_not_already_on(dataset_id)))
+            .filter(_not_already_on(dataset_id))
+            .filter(_single_person_clause()))
 
 
 def promotable_count(user_id, bank_id, dataset_id) -> int | None:
@@ -11575,10 +11597,12 @@ def promotion_plan(user_id, bank_id, dataset_id, quotas, ids=None):
     if not bank:
         raise ValueError('bank not found')
     dataset_id = dataset_activity.normalize_dataset_id(dataset_id)
-    rows = _promotable_query(bank_id, dataset_id)
+    base = (BankImage.query.filter_by(bank_id=bank_id, status='keep')
+            .filter(_not_already_on(dataset_id)))
     if ids:
-        rows = rows.filter(BankImage.id.in_(_normalize_promotion_ids(ids)))
-    rows = rows.all()
+        base = base.filter(BankImage.id.in_(_normalize_promotion_ids(ids)))
+    multi = base.filter(BankImage.n_faces > 1).count()
+    rows = base.filter(_single_person_clause()).all()
     # Best first: the Bank's own two scores, then the id so a plan is stable.
     ranked = sorted(
         rows,
@@ -11592,6 +11616,7 @@ def promotion_plan(user_id, bank_id, dataset_id, quotas, ids=None):
         'with_face_box': sum(1 for p in pictures if p['has_face_box']),
         'unranked': sum(1 for r in ranked if r.aesthetic_score is None),
         'unscored': sum(1 for r in ranked if r.face_state is None),
+        'multi_person': multi,
         'counts': out['counts'],
         'total': sum(out['counts'].values()),
         'reused': out['reused'],
@@ -11845,6 +11870,14 @@ def _promote_job(user_id, bank_id, ids, dataset_id, activity_token=None,
                         FaceDatasetImage.bank_image_id.in_(
                             row_ids[i0:i0 + _SQL_IN_CHUNK])).all())
         rows = [row for row in rows if row.id not in existing_source_ids]
+        # An EXPLICIT selection can still carry multi-person pictures (the
+        # default path filters them in _promotable_query): skip and count
+        # them — the run's detail line reports the loss like every other skip.
+        multi_skipped = sum(1 for row in rows
+                            if row.n_faces is not None and row.n_faces > 1)
+        if multi_skipped:
+            rows = [row for row in rows
+                    if row.n_faces is None or row.n_faces <= 1]
         rows.sort(key=lambda r: r.id)
         already_present = len(existing_source_ids)
         bank_jobs.progress(
@@ -12267,6 +12300,8 @@ def _promote_job(user_id, bank_id, ids, dataset_id, activity_token=None,
         detail = f'done — {len(imported_ids)} imported'
         if already_present:
             detail += f', {already_present} already present'
+        if multi_skipped:
+            detail += f', {multi_skipped} multi-person skipped'
         if small:
             detail += f', {small} under the recommended size'
         if framing_counts:

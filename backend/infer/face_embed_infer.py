@@ -10,14 +10,14 @@ Protocol (same family as face_score_infer.py):
             "device": "cpu"|"cuda", "require_yaw": bool,
             "groups": [{"name": str, "images": [abs paths]}]  # OPTIONAL}
   stdout : ONE JSON line {"ok": bool,
-            "results": {path: {state, det, bbox_frac, yaw|null}},
+            "results": {path: {state, det, bbox_frac, yaw|null, n_faces|int|null}},
             "clusters": {path: int}, "used_gpu": bool, "error"?: str,
             "group_clusters": {name: {path: int}}  # only when groups was given}
   stderr : "[embed] i/N <state>" progress lines (the parent streams these to
             drive the UI progress bar).
 
 Embeddings are CACHED in the .npz (parallel arrays paths/embs/states/dets/
-bfracs/yaws/sigs/hashes) and written incrementally every CACHE_EVERY images — killing the
+bfracs/yaws/sigs/hashes/nfs) and written incrementally every CACHE_EVERY images — killing the
 pass mid-way loses at most that slice, and re-clustering at another threshold is
 then near-instant.
 
@@ -27,6 +27,11 @@ measured", never 0.0, which would read as a perfectly frontal face. ``require_ya
 asks for those entries to be RE-DETECTED (the angle is not recoverable from the
 stored embedding); it is what the app's opt-in ⤢ backfill sets, and it is off by
 default so an ordinary resume never turns into hours of re-detection.
+
+``nfs`` (2026-09-07) rides the same opt-in: the number of faces the detection
+saw, reported as ``n_faces`` (null = not measured). The promotion excludes
+n_faces >= 2 — a co-star in the frame is exactly what the dataset must not
+eat — and one ⤢ re-detection recovers both the angle and the count.
 
 Clustering = union-find over cosine ≥ threshold on the
 L2-normed embeddings of the SCORABLE faces (biggest face per image — a group
@@ -112,6 +117,7 @@ def _load_cache(path):
             paths, states = z['paths'], z['states']
             embs, dets, bfracs = z['embs'], z['dets'], z['bfracs']
             yaws = z['yaws'] if 'yaws' in z.files else None
+            nfs = z['nfs'] if 'nfs' in z.files else None
             sigs = z['sigs'] if 'sigs' in z.files else None
             hashes = z['hashes'] if 'hashes' in z.files else None
             if (hashes is not None
@@ -125,7 +131,8 @@ def _load_cache(path):
                 digest = b''
             out[str(p)] = (states[i], float(dets[i]), float(bfracs[i]), embs[i],
                            float(yaws[i]) if yaws is not None else float('nan'),
-                           str(sigs[i]) if sigs is not None else '', digest)
+                           str(sigs[i]) if sigs is not None else '', digest,
+                           float(nfs[i]) if nfs is not None else float('nan'))
     except Exception as e:  # noqa: BLE001 — a corrupt cache = recompute, never fatal
         _log(f'[embed] cache unreadable, recomputing: {e}')
         return {}
@@ -149,6 +156,7 @@ def _save_cache(path, cache):
         dets=np.array([cache[p][1] for p in paths], dtype='float32'),
         bfracs=np.array([cache[p][2] for p in paths], dtype='float32'),
         yaws=np.array([cache[p][4] for p in paths], dtype='float32'),
+        nfs=np.array([cache[p][7] for p in paths], dtype='float32'),
         embs=np.stack([cache[p][3] for p in paths]).astype('float32'),
         sigs=np.array([_cache_sig(cache[p]) for p in paths]),
         hashes=np.frombuffer(b''.join(
@@ -270,7 +278,11 @@ def main() -> int:
             return True
         if _is_stale(p, cache[p]):
             return True
-        return require_yaw and not (cache[p][4] == cache[p][4])   # NaN test
+        if require_yaw and not (cache[p][4] == cache[p][4]):   # NaN test
+            return True
+        # The same ⤢ opt-in recovers face COUNTS for entries cached before the
+        # array existed — one re-detection buys both numbers.
+        return require_yaw and not (cache[p][7] == cache[p][7])
 
     todo = [p for p in images if _needs_work(p)]
     _write_count(cache_path, len(images) - len(todo))
@@ -338,10 +350,16 @@ def main() -> int:
                 img = cv2.imdecode(np.frombuffer(payload, dtype=np.uint8), cv2.IMREAD_COLOR)
                 if img is None:
                     result = ('unreadable', 0.0, 0.0, zero, float('nan'),
-                              signature, payload_hash)
+                              signature, payload_hash, float('nan'))
                 else:
                     h, w = img.shape[:2]
-                    f = biggest(app.get(img))
+                    # The count comes from the FIRST (unpadded) detection: the
+                    # padding rescue exists to surface the subject of a tight
+                    # close-up, and recounting on the padded copy would let
+                    # border junk read as people.
+                    detected = app.get(img)
+                    f = biggest(detected)
+                    n_detected = float(len(detected))
                     if f is None:   # padding rescue: SCRFD misses full-frame closeups
                         pad = int(0.25 * max(h, w))
                         f = biggest(app.get(cv2.copyMakeBorder(
@@ -351,7 +369,7 @@ def main() -> int:
                         scale = 1.0
                     if f is None:
                         result = ('no_face', 0.0, 0.0, zero, float('nan'),
-                                  signature, payload_hash)
+                                  signature, payload_hash, 0.0)
                     else:
                         area = (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1])
                         bbox_frac = float(area / (w * h) / scale)
@@ -374,7 +392,7 @@ def main() -> int:
                         result = (state, round(det, 3), round(bbox_frac, 4),
                                   f.normed_embedding.astype('float32'),
                                   yaw if yaw != yaw else round(yaw, 2), signature,
-                                  payload_hash)
+                                  payload_hash, n_detected)
                 # Inference may be much slower than the validated read.  Commit
                 # its local result only while the live path still identifies
                 # the bytes captured above.
@@ -396,7 +414,7 @@ def main() -> int:
                     uncached_changed += 1
                 else:
                     cache[p] = ('error', 0.0, 0.0, zero, float('nan'), signature,
-                                payload_hash)
+                                payload_hash, float('nan'))
                 _log(f'[embed] {i}/{len(todo)} ERROR {e}')
                 continue
             finally:
@@ -423,13 +441,16 @@ def main() -> int:
 
     results = {}
     for p in images:
-        entry = cache.get(p) or ('error', 0.0, 0.0, None, float('nan'), '', b'')
+        entry = cache.get(p) or ('error', 0.0, 0.0, None, float('nan'), '', b'',
+                                 float('nan'))
         state, det, bfrac, _emb, yaw = entry[:5]
+        nf = entry[7] if len(entry) > 7 else float('nan')
         digest = _cache_hash(entry)
         results[p] = {'state': str(state), 'det': float(det), 'bbox_frac': float(bfrac),
                       'fingerprint': digest.hex() if digest else None,
                       # null, never 0.0 — "not measured" is its own answer.
-                      'yaw': None if yaw != yaw else float(yaw)}
+                      'yaw': None if yaw != yaw else float(yaw),
+                      'n_faces': None if nf != nf else int(nf)}
     clusters = _cluster(images, cache, threshold)
     out = {'ok': True, 'results': results, 'clusters': clusters,
            'used_gpu': used_gpu}

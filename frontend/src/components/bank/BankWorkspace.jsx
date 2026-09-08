@@ -2619,6 +2619,12 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
                 🚫👤 No face
               </Chip>
             )}
+            {payload?.faces_scanned > 0 && (
+              <Chip active={filter.flag === 'multi_person'} onClick={() => setF({ flag: filter.flag === 'multi_person' ? null : 'multi_person' })}
+                title="Two or more faces — promotion skips these (unmeasured pictures stay promotable)">
+                👥👥 Multi-person
+              </Chip>
+            )}
           </FilterGroup>
 
           {/* Resolution tiers — one active at a time; re-click clears.

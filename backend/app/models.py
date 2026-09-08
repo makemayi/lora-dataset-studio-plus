@@ -394,6 +394,13 @@ class BankImage(db.Model):
     # NULL = unclustered (no usable face or pass not run yet).
     face_state = db.Column(String(16), nullable=True)
     face_det = db.Column(Float, nullable=True)
+    # n_faces (2026-09-07) = how many faces the subject pass detected (NULL =
+    # pass not run, or a row from before the column). Read-time verdicts derive
+    # the 'multi_person' chip from it, and promotion excludes n_faces >= 2: the
+    # dataset trains ONE subject, and a co-star in the frame is the exact
+    # contamination the bank exists to keep out. NULL never excludes — an
+    # unmeasured row must stay promotable (same rule as the plan's 'unscored').
+    n_faces = db.Column(Integer, nullable=True)
     face_cluster = db.Column(Integer, nullable=True, index=True)
     # WHERE the face_cluster id came from. NULL = the embeddings pass computed it
     # (the default, and what every row that predates this column carries).

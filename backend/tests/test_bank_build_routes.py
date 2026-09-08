@@ -128,3 +128,44 @@ def test_the_build_endpoint_accepts_a_valid_body(client, app, seeded_bank,
     # Both pictures have no face (the stub says so), so both land on the full
     # frame — the quotas' face/half slots simply go unfilled.
     assert counts == {'full': 2}
+
+
+def test_plan_without_quotas_fills_the_dataset_gaps(client, app, seeded_bank):
+    """No quotas in the body → the plan previews the GAP fill: each framing up
+    to the 20-picture floor minus what the dataset already holds. Here the
+    dataset already holds 19 face shots, so the face gap is exactly one."""
+    bank_id, dataset_id = seeded_bank
+    from app.extensions import db
+    from app.models import FaceDatasetImage
+    with app.app_context():
+        for i in range(19):
+            db.session.add(FaceDatasetImage(
+                dataset_id=dataset_id, status='keep', framing='face',
+                filename=f'gap{i}.jpg'))
+        db.session.commit()
+    r = client.post(f'/api/bank/{bank_id}/promote/plan',
+                    json={'dataset_id': dataset_id})
+    assert r.status_code == 200, r.get_json()
+    body = r.get_json()
+    # The bank has two pictures, so the allocation caps at what exists — but
+    # the face slot can never exceed the one-picture gap.
+    assert body['counts'].get('face', 0) <= 1
+
+
+def test_build_without_quotas_refuses_when_the_floor_is_met(client, app, seeded_bank):
+    """Every framing at or above the 20-picture floor → an honest refusal, not
+    a quiet no-op that looks like a build."""
+    bank_id, dataset_id = seeded_bank
+    from app.extensions import db
+    from app.models import FaceDatasetImage
+    with app.app_context():
+        for framing in ('face', 'bust', 'body', 'back'):
+            for i in range(20):
+                db.session.add(FaceDatasetImage(
+                    dataset_id=dataset_id, status='keep', framing=framing,
+                    filename=f'{framing}{i}.jpg'))
+        db.session.commit()
+    r = client.post(f'/api/bank/{bank_id}/build',
+                    json={'dataset_id': dataset_id})
+    assert r.status_code == 400
+    assert 'floor' in r.get_json()['error']

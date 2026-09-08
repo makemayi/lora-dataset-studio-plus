@@ -50,6 +50,17 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-09-07-bank-promote-multi-person-and-gap-defaults',
+    date: '2026-09-07',
+    title: 'Builds now fill your dataset\u2019s composition gaps — and never import a second person',
+    blurb: 'The face pass now counts how many people are in each picture: '
+      + 'two-person shots are excluded from promotion (reported, never '
+      + 'silently dropped) and filterable as a bank chip. And when a build '
+      + 'runs without explicit quotas, it now defaults to filling what the '
+      + 'dataset is actually missing — 20 pictures per framing, minus what '
+      + 'you already kept.',
+  },
+  {
     id: '2026-09-07-onetrainer-save-cadence-fallback',
     date: '2026-09-07',
     title: 'OneTrainer runs now save a checkpoint every 250 steps by default',

@@ -830,6 +830,34 @@ def bank_promote(bank_id):
                   per_framing_limit=per_framing_limit, quotas=quotas)
 
 
+_BUILD_GAP_TARGET = 20
+
+
+def _default_quotas(dataset_id):
+    """Build's gap defaults: fill each framing to the 20-picture training floor
+    MINUS what the dataset already holds, so a build heals the dataset's
+    composition gaps instead of asking the user to count them. Bank framing
+    vocabulary maps onto the dataset's as face→face, bust→half and
+    body+back→full (a back shot trains the full frame). Zeros are dropped; an
+    all-zero result means the dataset already meets the floor everywhere and
+    the caller answers honestly instead of importing nothing."""
+    from app.extensions import db
+    from app.models import FaceDatasetImage
+    have = {'face': 0, 'half': 0, 'full': 0}
+    kept = (FaceDatasetImage.query
+            .filter_by(dataset_id=dataset_id, status='keep')
+            .filter(FaceDatasetImage.framing.isnot(None)).all())
+    for row in kept:
+        if row.framing == 'face':
+            have['face'] += 1
+        elif row.framing == 'bust':
+            have['half'] += 1
+        elif row.framing in ('body', 'back'):
+            have['full'] += 1
+    return {k: target for k, target in ((k, _BUILD_GAP_TARGET - v)
+                                        for k, v in have.items()) if target > 0}
+
+
 def _build_quotas(data):
     """Validate the {framing: count} body shared by the plan and build routes."""
     quotas = data.get('quotas')
@@ -861,7 +889,10 @@ def bank_promote_plan(bank_id):
         return jsonify({'error': 'JSON body must be an object'}), 400
     try:
         dataset_id = dataset_activity.normalize_dataset_id(data.get('dataset_id'))
-        quotas = _build_quotas(data)
+        # No quotas → fill the dataset's composition gaps to the per-framing
+        # floor (see _default_quotas); the plan previews exactly what that
+        # means before anything runs.
+        quotas = _build_quotas(data) if data.get('quotas') else _default_quotas(dataset_id)
         return jsonify(banks.promotion_plan(LOCAL_USER, bank_id, dataset_id,
                                             quotas, ids=data.get('image_ids')))
     except ValueError as e:
@@ -875,7 +906,11 @@ def bank_build(bank_id):
         return jsonify({'error': 'JSON body must be an object'}), 400
     try:
         dataset_id = dataset_activity.normalize_dataset_id(data.get('dataset_id'))
-        quotas = _build_quotas(data)
+        quotas = _build_quotas(data) if data.get('quotas') else _default_quotas(dataset_id)
+        if not quotas:
+            return jsonify({'error': 'the dataset already meets the '
+                                     f'{_BUILD_GAP_TARGET}-per-framing floor — '
+                                     'pass explicit quotas to add more'}), 400
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
     upscale_below = data.get('upscale_below')

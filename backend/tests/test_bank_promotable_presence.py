@@ -192,3 +192,38 @@ def test_the_grid_stops_showing_a_promoted_badge_once_the_copy_is_deleted(
         page = banks.list_images('local', bank_id)
         assert page['images'][0]['promoted_dataset_id'] is None
         assert banks.bank_payload('local', bank_id)['counts']['promoted'] == 0
+
+
+def test_multi_person_pictures_are_not_promotable(app, ds, tmp_path):
+    """n_faces >= 2 stays out of promotion — the dataset trains ONE subject, and
+    a co-star in the frame is exactly the contamination the bank curates away.
+    NULL (unmeasured) stays promotable: exclusion must never rest on a number
+    the app does not have, and the plan reports the shrink as multi_person."""
+    from app.extensions import db
+    from app.models import BankImage, FaceDatasetImage
+    from app.services import image_bank_service as banks
+
+    with app.app_context():
+        bank_id = _bank_of(tmp_path / 'src', ['a.png', 'b.png', 'c.png'])
+        rows = BankImage.query.filter_by(bank_id=bank_id) \
+            .order_by(BankImage.id).all()
+        rows[0].n_faces = 2      # the two-person shot — excluded
+        rows[1].n_faces = 1
+        rows[2].n_faces = None   # never measured — still promotable
+        db.session.commit()
+
+        assert banks.promotable_count('local', bank_id, ds.id) == 2
+        plan = banks.promotion_plan('local', bank_id, ds.id,
+                                    {'face': 1, 'half': 1, 'full': 1})
+        assert plan['multi_person'] == 1
+
+        _promote(app, bank_id, ds.id)
+        origins = [i.bank_image_id for i in
+                   FaceDatasetImage.query.filter_by(dataset_id=ds.id).all()]
+        assert rows[0].id not in origins
+        assert len(origins) == 2
+
+        # An EXPLICIT selection naming the two-person shot skips it too —
+        # counted, never imported.
+        _promote(app, bank_id, ds.id, ids=[rows[0].id])
+        assert FaceDatasetImage.query.filter_by(dataset_id=ds.id).count() == 2
