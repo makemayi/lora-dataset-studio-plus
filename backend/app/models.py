@@ -192,6 +192,11 @@ class FaceDatasetImage(db.Model):
     face_score = db.Column(Float, nullable=True)
     face_state = db.Column(String(16), nullable=True)
     face_yaw = db.Column(Float, nullable=True)
+    # n_faces (2026-09-08) = how many faces the scorer's detector saw, whatever
+    # their size — the dataset-side twin of bank_image.n_faces. Feeds the
+    # Triage bar's 👥👥 Multi-person one-click reject. NULL = not measured:
+    # never reads as "single person".
+    n_faces = db.Column(Integer, nullable=True)
     # Pourquoi status='failed' : message d'erreur du moteur (API/sauvegarde/queue),
     # affiché sur la tuile — sinon l'échec est muet et l'utilisateur relance à
     # l'aveugle. Nettoyé au regenerate. Colonne additive (migration create_app).

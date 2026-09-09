@@ -3443,6 +3443,9 @@ def dataset_payload(user_id, dataset_id):
                     'leak_terms': _img_leak_terms(i),
                     'face_score': i.face_score, 'face_state': i.face_state,
                     'face_yaw': i.face_yaw,
+                    # Identity provenance (👥 pass): the Triage bar's
+                    # 👥👥 Multi-person one-click reject reads it from here.
+                    'n_faces': i.n_faces,
                     # A completed 🎭↔ swap can still be undone: the picture it
                     # replaced is in the Trash and the row remembers where. The
                     # tile shows ↩ only while that is true, so the button never

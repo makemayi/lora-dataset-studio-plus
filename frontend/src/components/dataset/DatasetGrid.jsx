@@ -67,7 +67,7 @@ const TILE_SIZE_TITLE = {
    Client-side derivation from the payload the grid already has; applies through
    the same batch endpoint as the manual multi-select, which already allows a
    direct keep<->reject switch (no backend change). */
-function AutoTriageBar({ images, datasetId, faceThresholds, onBatch, busy,
+export function AutoTriageBar({ images, datasetId, faceThresholds, onBatch, busy,
                          applying, onApplyingChange }) {
   const autoTriageRunGateRef = useRef(null);
   if (!autoTriageRunGateRef.current) {
@@ -84,6 +84,7 @@ function AutoTriageBar({ images, datasetId, faceThresholds, onBatch, busy,
   const [owned, setOwned] = useState({});
   const [lastRun, setLastRun] = useState(null); // {kept, rejected, t} of the last Apply
   const [applyFailure, setApplyFailure] = useState(null);
+  const [multiNote, setMultiNote] = useState(null);
   const [showHelp, setShowHelp] = useState(false);
 
   // A different dataset = a fresh session (the component isn't remounted on a
@@ -93,6 +94,7 @@ function AutoTriageBar({ images, datasetId, faceThresholds, onBatch, busy,
     setOwned({});
     setLastRun(null);
     setApplyFailure(null);
+    setMultiNote(null);
     setShowHelp(false);
     setT(faceThresholds?.green ?? DEFAULT_GREEN);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -111,7 +113,43 @@ function AutoTriageBar({ images, datasetId, faceThresholds, onBatch, busy,
   const replay = useMemo(() => [...pending, ...ownedImgs], [pending, ownedImgs]);
 
   // Keep the panel while there is anything to triage OR anything it still owns.
-  if (!replay.length) return null;
+  // The 👥👥 button extends that: a decided dataset can still hide multi-person
+  // photos, and hiding the bar would hide the one-click fix for them.
+  // 👥👥 Multi-person: images the scorer saw MORE THAN ONE face in — unwanted in
+  // a one-subject dataset whatever their status (pending or kept both flip;
+  // rejected stay). NULL n_faces (pass never ran) never matches: the button
+  // must not read absence as "single person". Declared BEFORE the early return:
+  // hooks run unconditionally.
+  const multi = useMemo(
+    () => images.filter((i) => i.status !== 'reject' && i.n_faces != null && i.n_faces > 1),
+    [images]);
+  if (!replay.length && !multi.length) return null;
+
+  const rejectMulti = async () => {
+    const runGate = autoTriageRunGateRef.current;
+    if (busy || runGate.hasActive(datasetId) || !multi.length) return;
+    const token = runGate.begin(datasetId);
+    if (!token) return;
+    onApplyingChange(datasetId, token, true);
+    setApplyFailure(null);
+    try {
+      const ids = multi.map((i) => i.id);
+      const result = await runAutoTriageBatches({
+        onBatch,
+        keepIds: [],
+        rejectIds: ids,
+        shouldContinue: () => runGate.isCurrent(token),
+      });
+      if (!runGate.isCurrent(token)) return;
+      runGate.commit(token, () => {
+        if (!result.ok) setApplyFailure(result);
+        else setMultiNote(`✓ rejected ${ids.length} multi-person image(s)`);
+      });
+    } finally {
+      const settled = runGate.finish(token, () => {});
+      if (settled) onApplyingChange(token.datasetId, token, false);
+    }
+  };
 
   const isReplay = lastRun != null; // at least one Apply already happened this session
   const keepTargets = replay.filter((i) => i.face_score >= t);
@@ -218,6 +256,16 @@ function AutoTriageBar({ images, datasetId, faceThresholds, onBatch, busy,
         <span role="alert" className="text-xs text-rose-700">
           {autoTriageFailureMessage(applyFailure)}
         </span>
+      )}
+      {multi.length > 0 && (
+        <button type="button" onClick={rejectMulti} disabled={busy || applying}
+          title={`Reject all ${multi.length} multi-face images — kept ones too. Run Face scoring first if the count looks stale.`}
+          className="px-3 py-1 rounded-full bg-surface-raised text-content text-xs font-semibold transition-colors disabled:opacity-40 hover:bg-surface">
+          👥👥 Multi-person ({multi.length})
+        </button>
+      )}
+      {multiNote && !applying && (
+        <span role="status" className="text-xs text-emerald-400">{multiNote}</span>
       )}
     </div>
   );

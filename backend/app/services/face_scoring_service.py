@@ -184,7 +184,7 @@ def analyze_faces(user_id, dataset_id) -> dict:
                        FaceDatasetImage.content_sig == content_sig,
                        FaceDatasetImage.content_sig_stat == content_sig_stat)
                 .values(face_state=r.get('state'), face_score=r.get('sim'),
-                        face_yaw=r.get('yaw'))
+                        face_yaw=r.get('yaw'), n_faces=r.get('n_faces'))
                 .execution_options(synchronize_session=False))
             if write.rowcount != 1:
                 # Another request won the row after inference.  It is newer than
@@ -219,7 +219,7 @@ def analyze_image_face(user_id, image_id):
         row = img if row is None else row
         result = {'image_id': row.id, 'face_state': row.face_state,
                   'face_score': row.face_score, 'face_yaw': row.face_yaw,
-                  'scoring_error': scoring_error}
+                  'n_faces': row.n_faces, 'scoring_error': scoring_error}
         if stale:
             result['stale'] = True
         return result
@@ -316,7 +316,7 @@ def analyze_image_face(user_id, image_id):
                    FaceDatasetImage.content_sig == content_sig,
                    FaceDatasetImage.content_sig_stat == content_sig_stat)
             .values(face_state=scored['state'], face_score=scored.get('sim'),
-                    face_yaw=scored.get('yaw'))
+                    face_yaw=scored.get('yaw'), n_faces=scored.get('n_faces'))
             .execution_options(synchronize_session=False))
         if write.rowcount != 1:
             db.session.rollback()

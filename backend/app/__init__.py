@@ -353,6 +353,9 @@ _SCHEMA_ADDITIONS = (
     # Face COUNT for the multi-person promotion exclusion (2026-09-07). NULL =
     # unmeasured stays promotable — the plan and the clause agree on that.
     ('bank_image', 'n_faces', 'INTEGER'),
+    # Dataset-side twin (2026-09-08): feeds the Triage bar's 👥👥 Multi-person
+    # one-click reject. NULL = the analyze-faces pass has not measured it.
+    ('face_dataset_image', 'n_faces', 'INTEGER'),
     # Exact-byte authority shared by every Bank analysis lane.  Existing rows
     # stay NULL and enter the explicit legacy compatibility path until a pass
     # re-attests them; inventing a backfill hash would falsely bless stale data.

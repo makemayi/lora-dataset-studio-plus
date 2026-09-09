@@ -50,6 +50,15 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-09-08-triage-multi-person-button',
+    date: '2026-09-08',
+    title: 'Triage bar: one 👥👥 button rejects every multi-face image',
+    blurb: 'The dataset\'s auto-triage bar gained a 👥👥 Multi-person button: '
+      + 'one click rejects every image where the scorer saw more than one '
+      + 'face — kept ones included. Face scoring now remembers how many '
+      + 'faces each picture held; re-run it once to backfill older datasets.'
+  },
+  {
     id: '2026-09-08-multi-person-auto-reject',
     date: '2026-09-08',
     title: 'One click clears every multi-person photo from a bank',
