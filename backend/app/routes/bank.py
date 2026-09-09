@@ -507,6 +507,21 @@ def bank_faces(bank_id):
     return _start(banks.start_faces, _app(), LOCAL_USER, bank_id)
 
 
+@bp.post('/bank/<int:bank_id>/subject-similarity')
+def bank_subject_similarity(bank_id):
+    """🎯 Set as subject: score every cached face embedding against this image
+    (pure numpy over the 👥 pass's cache — no model run). Synchronous on
+    purpose: it is seconds, and the grid's similarity sort + the 🧹 flag both
+    want the numbers right now."""
+    data = request.get_json(silent=True) or {}
+    try:
+        out = banks.set_subject_similarity(LOCAL_USER, bank_id,
+                                           data.get('image_id'))
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    return jsonify({'ok': True, **out})
+
+
 @bp.post('/bank/<int:bank_id>/score')
 def bank_score(bank_id):
     """Aesthetic + NSFW + style scoring pass (bank-scoring extra). 202/409/503.

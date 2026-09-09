@@ -205,3 +205,89 @@ def test_multi_person_flips_keeps_and_skips_unmeasured(app, client, tmp_path):
     after = _payload(client, bank_id)
     assert after['flags']['multi_person'] == 2            # facet keeps its number
     assert after['flags_actionable']['multi_person'] == 0
+
+
+def test_subject_similarity_scores_from_cached_embeddings(app, client, tmp_path):
+    """🎯 scores every cached embedding against the subject's by plain cosine —
+    no model run, no pass — and writes the number where the flag can read it.
+    Rows the 👥 pass never embedded stay NULL."""
+    import numpy as np
+    from app.extensions import db
+    from app.models import BankImage
+    from app.services import image_bank_service as banks
+
+    bank_id, _src = _mkbank(client, tmp_path, {
+        'a.png': checkerboard(), 'b.png': checkerboard(), 'c.png': checkerboard()})
+
+    c, s = float(np.cos(0.7)), float(np.sin(0.7))
+    vecs = [                                # b ⊥ a; c = a rotated by 0.7 rad
+        np.array([1.0, 0.0], dtype='float32'),
+        np.array([0.0, 1.0], dtype='float32'),
+        np.array([c, s], dtype='float32'),
+    ]
+
+    with app.app_context():
+        bank = banks.get_bank('local', bank_id)
+        rows = BankImage.query.filter_by(bank_id=bank_id) \
+            .order_by(BankImage.id).all()
+        paths = [str(banks.analysis_image_path(bank, r, refresh_rotation=False))
+                 for r in rows]
+        rid = [r.id for r in rows]
+        cache = banks._face_cache_path(bank_id)
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        np.savez(str(cache),
+                 paths=np.array(paths),
+                 states=np.array(['scorable'] * len(paths)),
+                 embs=np.stack(vecs),
+                 dets=np.ones(len(paths), dtype='float32'),
+                 bfracs=np.ones(len(paths), dtype='float32'),
+                 yaws=np.zeros(len(paths), dtype='float32'))
+
+    with app.app_context():
+        out = banks.set_subject_similarity('local', bank_id, rid[0])
+    assert out['scored'] == 3
+
+    with app.app_context():
+        vals = {r.id: r.face_sim
+                for r in BankImage.query.filter_by(bank_id=bank_id).all()}
+    assert abs(vals[rid[0]] - 1.0) < 1e-5     # the subject: cosine 1 with itself
+    assert abs(vals[rid[1]]) < 1e-5           # orthogonal: cosine 0
+    assert abs(vals[rid[2]] - c) < 1e-4       # 0.7 rad apart
+
+
+def test_not_subject_flag_uses_the_similarity_floor(app, client, tmp_path):
+    """🎯 not_subject rejects faces BELOW the floor — pending and kept both
+    (the operator's wrong-person cleanup is status-blind), while unmeasured
+    rows (NULL face_sim) are never called "the wrong person"."""
+    from app.extensions import db
+    from app.models import BankImage
+
+    bank_id, _src = _mkbank(client, tmp_path, {
+        'a.png': checkerboard(), 'b.png': checkerboard(),
+        'c.png': checkerboard(), 'd.png': checkerboard()})
+    with app.app_context():
+        rows = BankImage.query.filter_by(bank_id=bank_id) \
+            .order_by(BankImage.id).all()
+        rows[0].face_sim = 0.2    # below the floor, pending — flips
+        rows[1].face_sim = 0.9    # above the floor, KEPT — stays
+        rows[2].face_sim = 0.7    # above the floor, pending — stays
+        rows[3].face_sim = None   # unmeasured — never matched
+        db.session.commit()
+        rid = [r.id for r in rows]
+    _set_status(client, bank_id, [rid[1]], 'keep')
+
+    payload = _payload(client, bank_id)
+    assert payload['flags']['not_subject'] == 1
+    assert payload['flags_actionable']['not_subject'] == 1
+
+    assert _apply(client, bank_id, ['not_subject']) == 1
+
+    with app.app_context():
+        st = {r.id: (r.status, r.reject_reason)
+              for r in BankImage.query.filter_by(bank_id=bank_id).all()}
+    assert st[rid[0]] == ('reject', 'not_subject')
+    assert st[rid[1]][0] == 'keep'                       # above the floor
+    assert st[rid[2]][0] == 'pending'                    # above the floor
+    assert st[rid[3]][0] == 'pending'                    # unmeasured untouched
+    after = _payload(client, bank_id)
+    assert after['flags_actionable']['not_subject'] == 0

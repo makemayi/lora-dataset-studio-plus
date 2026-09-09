@@ -1184,6 +1184,9 @@ def image_flags(row: BankImage, th: dict) -> list:
     # must never read as "single person".
     if row.n_faces is not None and row.n_faces > 1:
         flags.append('multi_person')
+    if (row.face_sim is not None
+            and row.face_sim < th['subject_sim_min']):
+        flags.append('not_subject')
     return flags
 
 
@@ -1271,6 +1274,10 @@ def _image_dict(row: BankImage, th: dict, promoted_by: dict | None = None) -> di
         'dup_group': row.dup_group,
         'semantic_dup_group': row.semantic_dup_group,
         'face_state': row.face_state, 'face_cluster': row.face_cluster,
+        # 🎯 cosine similarity to the subject photo (see set_subject_similarity).
+        # NULL = never scored — the sort and the not_subject flag both treat
+        # that as "no opinion", never as "the wrong person".
+        'face_sim': row.face_sim,
         # 'asserted' = the person id came from the user's "this subfolder is one
         # person", not from an embedding. The grid says so rather than passing a
         # declaration off as a measurement.
@@ -1304,6 +1311,17 @@ def _flag_filter(flag: str, th: dict):
     """SQLAlchemy criterion for one flag name (mirrors image_flags)."""
     if flag == 'unreadable':
         return BankImage.quality_state == 'unreadable'
+    # Identity provenance — same predicate as the grid's multi-person chip.
+    # NULL-safe by SQL: an unmeasured row (the ⤢ pass never ran) compares
+    # NULL > 1 and simply never matches.
+    if flag == 'multi_person':
+        return BankImage.n_faces > 1
+    # Set by the 🎯 set-as-subject gesture: cosine similarity of the image's
+    # cached face embedding against the subject's. NULL = never scored —
+    # absence of a measurement is never read as "the wrong person".
+    if flag == 'not_subject':
+        return and_(BankImage.face_sim.isnot(None),
+                    BankImage.face_sim < th['subject_sim_min'])
     # Identity provenance — same predicate as the grid's multi-person chip.
     # NULL-safe by SQL: an unmeasured row (the ⤢ pass never ran) compares
     # NULL > 1 and simply never matches.
@@ -1350,7 +1368,7 @@ _SCORE_FLAGS = ('low_aesthetic', 'nsfw', 'watermark')
 # one click — keeps included). A third tuple, not folded into _QUALITY_FLAGS:
 # the flagged/clean quality aggregates and their worst-first ordering map must
 # not see a flag whose criterion reads a different column.
-_PROVENANCE_FLAGS = ('multi_person',)
+_PROVENANCE_FLAGS = ('multi_person', 'not_subject')
 
 # Resolution tiers for the Bank grid — bucketed on MEGAPIXELS (width×height, the
 # same rank as the resolution sort) so a mixed dump can be skimmed and mass-acted
@@ -1661,6 +1679,9 @@ _SORT_KEYS = {
     #                face-on" rather than "turned left" / "turned right", which
     #                is not a distinction a training set cares about.
     'yaw': lambda: func.abs(BankImage.face_yaw),
+    #   face_sim     the 🎯 set-as-subject cosine: ↓ is the cull view (least
+    #                like the subject first), ↑ the confidence view.
+    'face_sim': lambda: BankImage.face_sim,
     #   medium_conf  the 🎨 Medium pass's confidence gap. ↑ is the useful one: it
     #                opens on the images the classifier nearly could not call,
     #                which is exactly the pile a human should check by hand.
@@ -1669,7 +1690,8 @@ _SORT_KEYS = {
 # Menu order (the UI renders it in this order); ids are stored query values, so a
 # key may be added here but never renamed without an alias.
 _SORT_ORDER = ('res', 'size', 'aesthetic', 'nsfw', 'sharp', 'noise', 'flat',
-               'detail', 'bars', 'jpeg', 'face', 'yaw', 'medium_conf')
+               'detail', 'bars', 'jpeg', 'face', 'yaw', 'face_sim',
+               'medium_conf')
 GRID_SORTS = tuple(f'{k}_{d}' for k in _SORT_ORDER for d in ('desc', 'asc'))
 
 
@@ -2004,6 +2026,10 @@ def bank_payload(user_id, bank_id) -> dict | None:
     # here (same shape as scanned/scored above): the 👥 pass must have run
     # before the flag can match anything.
     counts['faces_scanned'] = faces_scanned
+    # 🎯 rows the set-as-subject gesture has scored. Gates the similarity sort
+    # and the not_subject flag's prerequisite line, same as scanned/scored.
+    counts['similarity_scored'] = base.filter(
+        BankImage.face_sim.isnot(None)).count()
     return {
         'id': bank.id, 'name': bank.name, 'source_path': bank.source_path,
         'semantic_engine': (semantic['engine'] if semantic else
@@ -2333,6 +2359,11 @@ def _apply_facets(q, th, skip=None, *, status=None, flag=None, cluster=None,
         # Two or more faces — what the promotion excludes. NULL (unmeasured)
         # never matches: a NULL comparison in SQL is not true.
         q = q.filter(BankImage.n_faces > 1)
+    elif flag == 'not_subject':
+        # Cosine-to-subject below the floor — the 🎯 set-as-subject gesture
+        # must have run first; unmeasured rows stay out of the pile.
+        q = q.filter(_flag_filter('not_subject', th))
+        order = BankImage.face_sim.asc()
     elif flag in _QUALITY_FLAGS:
         crit = _flag_filter(flag, th)
         if crit is not None:
@@ -2559,7 +2590,7 @@ def facet_counts(user_id, bank_id, **f) -> dict | None:
         func.count(BankImage.id),
         *[func.coalesce(func.sum(case((BankImage.status == s, 1), else_=0)), 0)
           for s in ('pending', 'keep', 'reject')]).one()
-    names = _QUALITY_FLAGS + _SCORE_FLAGS
+    names = _QUALITY_FLAGS + _SCORE_FLAGS + _PROVENANCE_FLAGS
     crits = {n: _flag_filter(n, th) for n in names}
     live = [n for n in names if crits[n] is not None]
     flags = dict.fromkeys(names, 0)
@@ -4507,6 +4538,8 @@ def _pool_query(bank_id, th, *, status=None, flag=None, cluster=None,
         q = q.filter(BankImage.face_state == 'no_face')
     elif flag == 'multi_person':
         q = q.filter(BankImage.n_faces > 1)
+    elif flag == 'not_subject':
+        q = q.filter(_flag_filter('not_subject', th))
     elif flag in _QUALITY_FLAGS + _SCORE_FLAGS:
         crit = _flag_filter(flag, th)
         if crit is not None:
@@ -5895,6 +5928,53 @@ def _angle_pool(bank_id, statuses=None, ids=None):
     if ids:
         q = q.filter(BankImage.id.in_([int(i) for i in ids][:_SQL_IN_CHUNK]))
     return q
+
+
+@_serialized_bank_mutation('subject_similarity')
+def set_subject_similarity(user_id, bank_id, subject_image_id, *, _bank_lease=None):
+    """🎯 Score every face the 👥 pass embedded against ONE subject face and
+    write the cosine to ``bank_image.face_sim`` — pure numpy over the cached
+    embeddings, no model run, so it is seconds on a 100 000-image bank.
+
+    Rows the 👥 pass never measured (not scorable, or unmeasured) stay NULL:
+    absence of an embedding is "no opinion", never "the wrong person". Raises
+    ValueError when the cache or the subject's own embedding is missing — the
+    👥 pass is the prerequisite the chip and the flag both name."""
+    import numpy as np
+    bank = get_bank(user_id, bank_id)
+    if not bank:
+        raise ValueError('bank not found')
+    cache_path = _face_cache_path(bank_id)
+    if not cache_path.exists():
+        raise ValueError('no face embeddings yet — run 👥 Group by person first')
+    subject = db.session.get(BankImage, int(subject_image_id))
+    if not subject or subject.bank_id != bank.id:
+        raise ValueError('subject image not found')
+    subject_path = str(analysis_image_path(bank, subject, refresh_rotation=False))
+    with np.load(cache_path, allow_pickle=False) as z:
+        paths = [str(p) for p in z['paths']]
+        states = [str(s) for s in z['states']]
+        embs = z['embs']
+    index = {p: i for i, p in enumerate(paths)}
+    subj_i = index.get(subject_path)
+    if subj_i is None or states[subj_i] != 'scorable':
+        raise ValueError(
+            'the subject photo has no face embedding — pick one the 👥 pass measured')
+    ref = np.asarray(embs[subj_i], dtype='float32')
+    ref /= (np.linalg.norm(ref) + 1e-8)
+    sims = {}
+    for r in BankImage.query.filter_by(bank_id=bank_id).all():
+        i = index.get(str(analysis_image_path(bank, r, refresh_rotation=False)))
+        if i is None or states[i] != 'scorable':
+            continue
+        e = np.asarray(embs[i], dtype='float32')
+        sims[r.id] = float((e @ ref) / (np.linalg.norm(e) + 1e-8))
+    if not sims:
+        raise ValueError('no face embeddings matched — run 👥 Group by person first')
+    for rid, s in sims.items():
+        BankImage.query.filter_by(id=rid).update({'face_sim': s})
+    db.session.commit()
+    return {'scored': len(sims)}
 
 
 def start_faces(app, user_id, bank_id, angles_only=False, statuses=None, ids=None):

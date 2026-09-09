@@ -179,6 +179,13 @@ export const BANK_THRESHOLDS = [
     hint: 'How alike two faces must be to land in the same 👥 person cluster. Lower merges more people together; higher splits one person into several clusters.',
   },
   {
+    field: 'subject_sim_min', group: 'content', flag: 'not_subject',
+    label: 'Subject similarity minimum', unit: 'cosine similarity',
+    step: 0.01, min: 0, max: 1, integer: false,
+    catchesMoreWhen: 'raised', applies: 'instant',
+    hint: 'Cosine to the 🎯 subject photo under which an image is flagged 🎯 not the subject — the 🧹 Auto-reject pile. Needs 🎯 set-as-subject on the bank (a tile button); a lookalike can clear the floor, so glance before confirming.',
+  },
+  {
     field: 'aesthetic_min', group: 'content', flag: 'low_aesthetic',
     label: 'Aesthetic minimum', unit: 'LAION score, ~1–10',
     step: 0.5, min: 0, max: 10, integer: false,

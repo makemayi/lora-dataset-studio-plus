@@ -52,6 +52,10 @@ const ANGLE = { needs: 'angle_measured', missing: 'measure head angles',
   group: '🎭 Faces' };
 const MEDIUM = { needs: 'medium_classified', missing: 'run 🎨 Medium',
   group: '🎨 Medium' };
+// 🎯 Set as subject writes face_sim for every face the 👥 pass embedded; the
+// gate is that gesture's own coverage count, not the 👥 pass itself.
+const SUBJECT = { needs: 'similarity_scored',
+  missing: 'pick a photo of the subject (🎯 on a tile)', group: '🎯 Subject' };
 
 /** One measure = two entries (↓ then ↑). `hi`/`lo` are what each direction puts
  *  in front of you — written as the REASON to pick it, not as a restatement of
@@ -98,6 +102,11 @@ export const BANK_SORTS = [
   ...measure('face', 'Face confidence', FACE,
     'Clearest faces first — from the 🎭 Faces pass',
     'Weakest faces first — tiny, turned or half-hidden faces'),
+  // The cull view is ↑: it opens on the faces LEAST like the subject, which is
+  // exactly the pile a wrong-person cleanup wants in front of it.
+  ...measure('face_sim', 'Subject similarity', SUBJECT,
+    'Most like the subject first — the confident keeps',
+    'Least like the subject first — the fastest wrong-person cull'),
   // The head angle is ordered on its ABSOLUTE value: "turned left" and "turned
   // right" are one shot type, and splitting them would halve every answer for a
   // distinction no training set makes.

@@ -164,11 +164,22 @@ test('multi_person is offered behind the 👥 pass and says so when it never ran
   // The checkbox renders the shared candidate label like every other flag.
   assert.match(ws, /flagCandidateLabel\(f, flagsActionable\)/);
   // The workspace gates the offer on the same measurement...
-  assert.match(ws, /const PROVENANCE_REJECT_FLAGS = \['multi_person'\]/);
+  assert.match(ws, /const PROVENANCE_REJECT_FLAGS = \['multi_person', 'not_subject'\]/);
   assert.match(ws, /availableProvenanceFlags = PROVENANCE_REJECT_FLAGS\.filter\(/);
   assert.match(ws, /\(counts\?\.faces_scanned \|\| 0\) > 0/);
   // ...feeds it into the panel's checkbox list...
   assert.match(ws, /\.\.\.availableProvenanceFlags\]\.map\(\(f\) => \{/);
   // ...and labels it.
   assert.match(ws, /multi_person: '👥👥 Multi-person'/);
+});
+
+test('not_subject is offered behind the 🎯 set-as-subject gesture', () => {
+  // The flag reads face_sim, which only the 🎯 tile button writes. A bank
+  // where nobody has been picked says so instead of advertising a lying 0.
+  assert.equal(FLAG_PREREQ.not_subject, 'subject');
+  const blocked = flagPrereq('not_subject', { similarity_scored: 0 }, 0);
+  assert.match(blocked, /pick a photo of the subject/);
+  assert.equal(flagPrereq('not_subject', { similarity_scored: 900 }, 0), null);
+  // The workspace offers it in the same panel, behind the same gate shape.
+  assert.match(ws, /not_subject: '🎯 Not the subject'/);
 });

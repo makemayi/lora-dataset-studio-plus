@@ -392,6 +392,11 @@ DEFAULTS = {
     #   style_threshold on purpose — a crop is far closer than merely "same style".
     'bank': {'sharpness_min': 100.0, 'noise_max': 15.0, 'uniformity_min': 12.0,
              'dup_distance': 8, 'min_side': 768, 'face_threshold': 0.45,
+             # subject_sim_min: 🎯 set-as-subject cosines below this floor are
+             # flagged 'not_subject' (🧹 Auto-reject + the grid chip). 0.45 is
+             # the clustering threshold — same "probably different people"
+             # intuition, applied against ONE reference instead of union-find.
+             'subject_sim_min': 0.45,
              'aesthetic_min': 5.0, 'nsfw_max': 0.5, 'style_threshold': 0.6,
              'semantic_dup_threshold': 0.96,
              # detail_min: effective resolution (0..1 of the stored size) below

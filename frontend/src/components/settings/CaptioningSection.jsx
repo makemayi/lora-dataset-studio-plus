@@ -389,6 +389,18 @@ export default function CaptioningSection({ config, setField, configDefaults }) 
               config={config} configDefaults={configDefaults} setField={setField} />
           </div>
           <div>
+            <label htmlFor="bank-subject-sim-min" className="block text-sm font-medium text-content">
+              Subject similarity minimum
+            </label>
+            <input id="bank-subject-sim-min" type="number" min="0" max="1" step="0.01"
+              value={config.bank?.subject_sim_min ?? bankDefault('subject_sim_min')}
+              onChange={(e) => setField('bank', 'subject_sim_min', parseFloat(e.target.value) || 0)}
+              className={INPUT_CLASS} />
+            <HelpText className="mt-0.5 text-xs text-content-muted">Cosine to the 🎯 subject photo under this = 🎯 not the subject. Applies instantly.</HelpText>
+            <ResetToDefault label="Subject similarity minimum" section="bank" field="subject_sim_min"
+              config={config} configDefaults={configDefaults} setField={setField} />
+          </div>
+          <div>
             <label htmlFor="bank-aesthetic-min" className="block text-sm font-medium text-content">
               Aesthetic minimum
             </label>

@@ -406,6 +406,11 @@ class BankImage(db.Model):
     # contamination the bank exists to keep out. NULL never excludes — an
     # unmeasured row must stay promotable (same rule as the plan's 'unscored').
     n_faces = db.Column(Integer, nullable=True)
+    # face_sim (2026-09-08) = cosine of this image's cached face embedding
+    # against the subject photo picked by 🎯 set-as-subject (see
+    # set_subject_similarity). NULL = never scored — the not_subject flag and
+    # the face_sim sort both treat that as "no opinion".
+    face_sim = db.Column(Float, nullable=True)
     face_cluster = db.Column(Integer, nullable=True, index=True)
     # WHERE the face_cluster id came from. NULL = the embeddings pass computed it
     # (the default, and what every row that predates this column carries).

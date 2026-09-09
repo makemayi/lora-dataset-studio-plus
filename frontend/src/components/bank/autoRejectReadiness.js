@@ -48,6 +48,9 @@ export const FLAG_PREREQ = {
   // 👥 Group by person wrote the n_faces column the flag reads; a bank it has
   // never run on matches nothing and the 0 means "not measured yet".
   multi_person: 'faces',
+  // 🎯 set-as-subject wrote the face_sim column the flag reads — a different
+  // gesture with its own coverage, so a 0 says "pick a subject first".
+  not_subject: 'subject',
 }
 
 /** The gesture that unblocks each prerequisite, in the app's own button names. */
@@ -57,6 +60,7 @@ export const FLAG_PREREQ_TEXT = {
   score: 'run ✨ Score first — nothing here has been scored yet',
   watermark: 'run 🚩 Find watermarks first — nothing here has been checked yet',
   faces: 'run 👥 Group by person first — faces here have not been counted yet',
+  subject: 'pick a photo of the subject (🎯 on a tile) first — nothing has been scored yet',
 }
 
 /** How many images the pass behind `kind` has reached in this bank.
@@ -68,6 +72,7 @@ function coverage(kind, counts, originMeasured) {
   if (kind === 'score') return counts?.scored || 0
   if (kind === 'watermark') return counts?.watermark_scanned || 0
   if (kind === 'faces') return counts?.faces_scanned || 0
+  if (kind === 'subject') return counts?.similarity_scored || 0
   return 1
 }
 

@@ -145,6 +145,7 @@ const FLAG_LABEL = {
   // V2 scoring flags (aesthetic · NSFW · watermark passes).
   low_aesthetic: '💔 Low aesthetic', nsfw: '🔞 NSFW', watermark: '🚩 Watermark',
   multi_person: '👥👥 Multi-person',
+  not_subject: '🎯 Not the subject',
 }
 const FLAG_HINT = {
   soft_detail: 'The picture stops before the pixels do — usually an enlargement. '
@@ -153,6 +154,8 @@ const FLAG_HINT = {
     + 'A dark-themed screenshot reads the same, so check before mass-rejecting.',
   multi_person: 'Flips KEPT images too, not just undecided ones. The detector '
     + 'can miss a small or background face — glance at the pile before confirming.',
+  not_subject: 'Cosine below the subject-similarity floor (Settings). Flips KEPT '
+    + 'images too. A lookalike can clear the floor — glance before confirming.',
 }
 // These two are measurements of PROVENANCE, not quality verdicts, which is why
 // the overnight pipeline does not offer them (backend PIPELINE_REJECT_FLAGS) and
@@ -168,7 +171,7 @@ const SCORE_REJECT_FLAGS = ['low_aesthetic', 'nsfw', 'watermark']
 // unwanted as LoRA dataset material, full stop, and the operator asked for it
 // to go in one click — pending AND kept rows both flip (2026-09-08). Offered
 // only once that pass has measured the bank, same gate as the grid chip.
-const PROVENANCE_REJECT_FLAGS = ['multi_person']
+const PROVENANCE_REJECT_FLAGS = ['multi_person', 'not_subject']
 // Resolution tiers — ids + labels MUST mirror backend _RES_BUCKETS (order and
 // megapixel bands). Rendered as a dedicated chip row so a mixed dump can be
 // sliced by resolution and mass-acted one tier at a time.
@@ -645,7 +648,7 @@ function CoveragePanel({ coverage, semanticEngine, semanticLabel,
   )
 }
 
-function Tile({ img, bankId, selected, onToggle, onReview, onTags, size }) {
+function Tile({ img, bankId, selected, onToggle, onReview, onTags, onSetSubject, size }) {
   // `key` matters only for the flags list below (the one mapped array) — it was
   // missing and logged a React warning on every bank grid render.
   // The chips this image would actually offer. Computed HERE rather than asked of
@@ -750,6 +753,12 @@ function Tile({ img, bankId, selected, onToggle, onReview, onTags, size }) {
             ? 'Tags unavailable: this caption has no word worth filtering on'
             : 'Tags unavailable: this image has no caption yet'}
           className="absolute bottom-1 right-11 rounded bg-black/40 px-1 text-[11px] text-white/35">🏷️</span>
+      )}
+      {img.face_state === 'scorable' && (
+        <button type="button" onClick={onSetSubject}
+          title="🎯 Set as subject — score every face in this bank against this one, then sort by similarity or bulk-reject the misses"
+          aria-label={`Set ${img.name} as the subject`}
+          className="absolute bottom-1 right-16 rounded bg-black/60 px-1 text-[11px] text-sky-300 hover:bg-black/80">🎯</button>
       )}
       <button type="button" onClick={onReview}
         title="Review from this image — full size, one at a time, with Keep/Reject/Skip"
@@ -1025,6 +1034,20 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
   }, [bankId, filter, offset, filterParams, showSelected, selectedOrder])
 
   useEffect(() => { refreshImagesRef.current = refreshImages }, [refreshImages])
+
+  // 🎯 Set as subject: score every cached face embedding against this image.
+  // Seconds (pure numpy over the 👥 pass's cache) — synchronous call, then a
+  // refresh so the similarity sort and the not_subject chip come alive.
+  const setSubject = async (img) => {
+    try {
+      const r = await postJson(`/api/bank/${bankId}/subject-similarity`,
+        { image_id: img.id })
+      toast.success(`🎯 scored ${r.scored} images against this face — sort by “Subject similarity ↑” to cull`)
+      refreshPayload(); refreshImages()
+    } catch (e) {
+      toast.error(e?.message || 'Could not score similarity.')
+    }
+  }
 
   // The chip counters, re-measured whenever the filter — or the data under it —
   // moves. Skipped entirely while nothing is filtered: there the payload's
@@ -2638,6 +2661,12 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
                 👥👥 Multi-person
               </Chip>
             )}
+            {(counts?.similarity_scored || 0) > 0 && (
+              <Chip active={filter.flag === 'not_subject'} onClick={() => setF({ flag: filter.flag === 'not_subject' ? null : 'not_subject' })}
+                title="Faces below the subject-similarity floor — sorted worst-first">
+                🎯 Not the subject {flags.not_subject ?? 0}
+              </Chip>
+            )}
           </FilterGroup>
 
           {/* Resolution tiers — one active at a time; re-click clears.
@@ -3387,6 +3416,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
                 selected={selected.has(img.id)}
                 onReview={() => openReview(img.id)}
                 onTags={() => openTagPicker(img)}
+                onSetSubject={() => setSubject(img)}
                 onToggle={() => setSelected((prev) => {
                   const next = new Set(prev)
                   if (next.has(img.id)) next.delete(img.id); else next.add(img.id)

@@ -130,6 +130,7 @@ test('bank sort ids are the ones the server accepts (never rename: they are stor
     'flat_desc', 'flat_asc', 'detail_desc', 'detail_asc',
     'bars_desc', 'bars_asc', 'jpeg_desc', 'jpeg_asc',
     'face_desc', 'face_asc',
+    'face_sim_desc', 'face_sim_asc',
     'yaw_desc', 'yaw_asc',
     'medium_conf_desc', 'medium_conf_asc',
   ]);
@@ -149,14 +150,16 @@ test('bank sort ids are the ones the server accepts (never rename: they are stor
 // ---- the menu is grouped by the pass that measures it ----------------------
 
 test('bank menu groups by pass, keeps every option, and heads with Default', () => {
-  const groups = bankSortGroups({ scanned: 1, scored: 1, faces: 1 });
+  const groups = bankSortGroups({ scanned: 1, scored: 1, faces: 1,
+    similarity_scored: 1 });
   assert.deepEqual(groups[0], {
     group: '',
     options: [{ id: 'default', group: '', label: 'Default', disabled: false,
       title: groups[0].options[0].title }],
   });
   assert.deepEqual(groups.map((g) => g.group),
-    ['', '📁 File', '✨ Score', '🔎 Scan quality', '🎭 Faces', '🎨 Medium']);
+    ['', '📁 File', '✨ Score', '🔎 Scan quality', '🎭 Faces', '🎯 Subject',
+      '🎨 Medium']);
   // Grouping is a RE-ARRANGEMENT: no option invented, none lost, none duplicated.
   const flat = groups.flatMap((g) => g.options.map((o) => o.id));
   assert.deepEqual(flat.slice().sort(), BANK_SORTS.map((s) => s.id).slice().sort());

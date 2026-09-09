@@ -45,7 +45,7 @@ function bankKeysFromConfigPy() {
 
 test('every bank threshold in config.py is exposed by the Bank panel', () => {
   const shipped = bankKeysFromConfigPy();
-  assert.equal(shipped.length, 12, 'config.py still ships twelve bank thresholds');
+  assert.equal(shipped.length, 13, 'config.py still ships thirteen bank thresholds');
   const exposed = BANK_THRESHOLDS.map((t) => t.field);
   assert.deepEqual([...exposed].sort(), [...shipped].sort());
 });
@@ -83,8 +83,8 @@ test('no default value is typed into the frontend', () => {
   const src = fs.readFileSync(new URL('./bankThresholds.js', import.meta.url), 'utf8');
   // The shipped numbers, straight from config.py. None of them may appear as a
   // "default" anywhere in our module — the reset button reads config_defaults.
-  const defaults = [...configPy.matchAll(/'(sharpness_min|noise_max|uniformity_min|dup_distance|min_side|face_threshold|aesthetic_min|nsfw_max|style_threshold|semantic_dup_threshold|detail_min|bars_max)':\s*([0-9.]+)/g)];
-  assert.equal(defaults.length, 12, 'read all twelve shipped defaults');
+  const defaults = [...configPy.matchAll(/'(sharpness_min|noise_max|uniformity_min|dup_distance|min_side|face_threshold|subject_sim_min|aesthetic_min|nsfw_max|style_threshold|semantic_dup_threshold|detail_min|bars_max)':\s*([0-9.]+)/g)];
+  assert.equal(defaults.length, 13, 'read all thirteen shipped defaults');
   assert.doesNotMatch(src, /\bdefault(Value)?\s*:/,
     'bankThresholds.js declares no default — the server sends them');
   assert.doesNotMatch(panel, /\bconst\s+\w*DEFAULTS?\b/,
@@ -151,7 +151,7 @@ test('the direction of every threshold matches what the backend does with it', (
     min_side: 'raised', detail_min: 'raised', bars_max: 'lowered',
     dup_distance: 'raised', semantic_dup_threshold: 'lowered',
     face_threshold: 'lowered', aesthetic_min: 'raised', nsfw_max: 'lowered',
-    style_threshold: 'lowered',
+    style_threshold: 'lowered', subject_sim_min: 'raised',
   };
   for (const t of BANK_THRESHOLDS) {
     assert.equal(t.catchesMoreWhen, expected[t.field], t.field);
@@ -361,7 +361,7 @@ test('dirty fields ignore invalid edits and no-op retypes', () => {
 test('only the read-time thresholds offer a live count', () => {
   assert.deepEqual(previewableFields().sort(), [
     'aesthetic_min', 'bars_max', 'detail_min', 'min_side', 'noise_max',
-    'nsfw_max', 'sharpness_min', 'uniformity_min',
+    'nsfw_max', 'sharpness_min', 'subject_sim_min', 'uniformity_min',
   ]);
 });
 

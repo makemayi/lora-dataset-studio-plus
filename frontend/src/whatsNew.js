@@ -50,6 +50,16 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-09-08-subject-similarity',
+    date: '2026-09-08',
+    title: '🎯 Set as subject: cull every face that is not the person you want',
+    blurb: 'Scraped banks mix in lookalikes and strangers. Click 🎯 on one '
+      + 'photo of your subject and the bank scores every face against it — '
+      + 'sort by similarity to see the misses, filter with the 🎯 chip, or '
+      + 'let 🧹 Auto-reject take the pile below the floor. No model run: it '
+      + 'scores the embeddings the 👥 pass already cached.'
+  },
+  {
     id: '2026-09-08-triage-multi-person-button',
     date: '2026-09-08',
     title: 'Triage bar: one 👥👥 button rejects every multi-face image',
