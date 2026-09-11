@@ -1,0 +1,123 @@
+"""MiniMax-H3 RefMod extraction worker.
+
+Executed by the COMFYUI interpreter (it owns torch + the comfy-adjacent deps),
+never by the LDS backend process. Reads one JSON manifest on stdin:
+
+    {"node_dir":   ".../custom_nodes/ComfyUI-MiniMaxH3Mod",
+     "images":     ["abs/path.png", ...],
+     "vae":        ".../models/vae/<h3 video vae>.safetensors",
+     "output_dir": ".../models/refmods",
+     "name":       "minimaxh3_<dataset>_v1_refmod",
+     "description": "..."}
+
+and writes the RefMod, then prints ONE json line on stdout:
+    {"ok": true, "tokens": N, "frames": N, "path": "...", "mb": 1.5}
+
+Any failure prints {"ok": false, "error": "..."} and exits 1. The encode flow
+mirrors the node pack's own extract_mod.py (encode mode, 1024px short edge,
+fp16 latents, 8192-token budget) — one implementation per runtime, by design:
+this file runs where torch lives, extract_mod.py is the pack's CLI.
+"""
+from __future__ import annotations
+
+import json
+import os
+import sys
+
+
+def _fail(message: str) -> None:
+    print(json.dumps({"ok": False, "error": message}, ensure_ascii=True))
+    sys.exit(1)
+
+
+def main() -> None:
+    try:
+        manifest = json.loads(sys.stdin.read() or "{}")
+        node_dir = manifest["node_dir"]
+        images = [p for p in manifest.get("images", []) if os.path.isfile(p)]
+        vae_path = manifest["vae"]
+        output_dir = manifest["output_dir"]
+        name = manifest["name"]
+        description = manifest.get("description", "")
+    except Exception as e:  # noqa: BLE001 - the only exit path for a bad manifest
+        _fail(f"bad manifest: {e}")
+        return
+
+    if not images:
+        _fail("no readable images in the manifest")
+        return
+    for required in (node_dir, vae_path, output_dir):
+        if not required or not os.path.isdir(required) and not os.path.isfile(required):
+            _fail(f"missing path in manifest: {required}")
+            return
+
+    if node_dir not in sys.path:
+        sys.path.insert(0, node_dir)
+    comfy_root = os.path.abspath(os.path.join(node_dir, "..", ".."))
+    if comfy_root not in sys.path:
+        sys.path.insert(0, comfy_root)
+
+    try:
+        import torch
+
+        from common import load_image_file, resize_ref as _resize_ref, ensure_min_size
+        from core import H3RefMod, fit_token_budget
+
+        import comfy.model_management
+        import comfy.sd
+        import comfy.utils
+    except Exception as e:  # noqa: BLE001
+        _fail(f"cannot import the RefMod node pack or ComfyUI: {e}")
+        return
+
+    try:
+        device = comfy.model_management.get_torch_device()
+        sd, metadata = comfy.utils.load_torch_file(vae_path, return_metadata=True)
+        vae = comfy.sd.VAE(sd=sd, metadata=metadata, device=device)
+        vae.throw_exception_if_invalid()
+
+        resolution = 1024
+        max_tokens = 8192
+        first = load_image_file(images[0], max_edge=resolution * 2)
+        h, w = first.shape[1], first.shape[2]
+        scale = min(1.0, resolution / min(h, w))
+        canvas = (max(32, round(w * scale / 32) * 32),
+                  max(32, round(h * scale / 32) * 32))
+
+        frames, shapes = [], []
+        for path in images:
+            src = ensure_min_size(_resize_ref(load_image_file(path, max_edge=resolution * 2),
+                                              resolution, canvas))
+            with torch.no_grad():
+                z = vae.encode(src.to(device)).float().cpu()
+            frames.append(z.to(torch.float16))
+            shapes.append(f"{z.shape[2]}x{z.shape[3]}x{z.shape[4]}")
+
+        latent = torch.cat(frames, dim=2)
+        latent = fit_token_budget(latent, max_tokens, name)
+        total_t = latent.shape[2]
+        px_w, px_h = latent.shape[4] * 16, latent.shape[3] * 16
+        mod = H3RefMod(
+            name=name, kind="video" if total_t > 1 else "image", latent=latent,
+            latent_h=latent.shape[3], latent_w=latent.shape[4], latent_t=total_t,
+            mode="encode", source="stack" if len(frames) > 1 else "image",
+            source_shape=" +".join(shapes),
+            pool=f"full-res {px_w}x{px_h}px (short-edge cap {resolution}px)",
+            optimize_steps=0, tags=[f"{len(frames)} img"],
+            description=description, concept_type="identity",
+        )
+        mod.path = os.path.join(output_dir, name)
+        saved = mod.save(mod.path)
+        mb = latent.numel() * latent.element_size() / 1024 / 1024
+        print(json.dumps({"ok": True, "tokens": mod.token_count, "frames": total_t,
+                          "path": saved, "mb": round(mb, 2)}, ensure_ascii=True))
+    except Exception as e:  # noqa: BLE001
+        _fail(f"{type(e).__name__}: {e}")
+
+
+if __name__ == "__main__":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:  # noqa: BLE001 - pre-3.7 or exotic stdout; JSON stays ASCII
+        pass
+    main()

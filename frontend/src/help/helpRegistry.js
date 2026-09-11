@@ -2066,6 +2066,11 @@ const TOPICS = [
      'face', 'bust', 'body', 'back', 'sort shots', 'imported', 'import', 'drag and drop',
      'no crop', 'head crop off', 'ollama', 'vision', 'qwen'],
     '/datasets?section=add', 'dataset-guide', '2-how-many-images-and-which-ones'),
+  action('action-h3-refmod', 'Generate an H3 RefMod from kept images',
+    ['refmod', 'h3', 'minimax', 'reference', 'reference mod', 'reference bundle',
+     'safetensors reference', 'identity reference', 'vae encode', 'conditioning',
+     'one-click mod', 'generate mod'],
+    '/datasets?section=images', 'using-the-app', 'sort-a-grid-to-review-faster'),
   // The composition bar can be fully green on a set that is one pose, one outfit,
   // one light. This is the panel that says so — keyworded on the SYMPTOM ("all my
   // images look the same", "lora only makes one pose"), because that is what

@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router';
 import CompositionBar from './CompositionBar';
 import CoveragePanel from './CoveragePanel';
 import ClassifyFramingButton from './ClassifyFramingButton';
+import H3RefModButton from './H3RefModButton';
 import ReferencePanel from './ReferencePanel';
 import VariationCatalog from './VariationCatalog';
 import TrainingPanel from './TrainingPanel';
@@ -2067,6 +2068,13 @@ export default function DatasetWorkspace({ ds, onBack }) {
                   busy={ds.busy}
                   open={captionToolsOpen}
                   onOpenChange={(open) => onRevealOpenChange('tools', open, setCaptionToolsOpen)} />
+                <div className="flex items-center gap-2">
+                  {/* Reference-bundle export for the H3 nodes: sits with the other
+                      whole-dataset passes (caption, tools) — same kept-images input. */}
+                  <H3RefModButton count={images.filter((i) => i.status === 'keep').length}
+                    busy={ds.busy} onClick={() => ds.generateRefMod()} />
+                  <HelpBadge topic="action-h3-refmod" />
+                </div>
               </div>
               {filtersActive && (
                 <p className="m-0 text-content-subtle text-[0.6875rem]">

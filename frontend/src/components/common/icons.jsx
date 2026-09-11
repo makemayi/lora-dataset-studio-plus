@@ -374,6 +374,20 @@ export function SubjectTrimIcon(props) {
   );
 }
 
+/* H3 RefMod: a stack of reference sheets (two offset rounded rects — the saved
+   latent bundle) with the subject's face on the front sheet. Sibling of
+   SubjectTrimIcon; same stroke style. */
+export function RefModIcon(props) {
+  return (
+    <Glyph name="refmod" {...props}>
+      <rect x="7" y="3.5" width="13" height="13" rx="2" />
+      <path d="M4.5 7v11.5a2 2 0 0 0 2 2H17" />
+      <circle cx="12" cy="8.5" r="1.7" />
+      <path d="M9.5 13.5c0-1.4 1.1-2.5 2.5-2.5s2.5 1.1 2.5 2.5" />
+    </Glyph>
+  );
+}
+
 /**
  * The round icon-button shell, shared by every utility control in the header
  * (What's new, update check, the ? and gear menus, the mobile hamburger) and by

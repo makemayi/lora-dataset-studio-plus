@@ -50,6 +50,15 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-09-11-h3-refmod-button',
+    date: '2026-09-11',
+    title: '🧩 One-click H3 RefMod: turn a dataset into a reusable reference',
+    blurb: 'A new button next to the caption tools encodes your kept images '
+      + '(6 face + 6 half + 4 full) into a MiniMax-H3 RefMod the Load / Apply '
+      + 'RefMod nodes can use — no re-encoding references by hand every run. '
+      + 'Needs the MiniMaxH3Mod node pack and an H3 video VAE in ComfyUI.'
+  },
+  {
     id: '2026-09-08-subject-similarity',
     date: '2026-09-08',
     title: '🎯 Set as subject: cull every face that is not the person you want',

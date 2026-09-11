@@ -19,6 +19,7 @@ from .. import config as cfg
 from ..gpu_window import gpu_exclusive_vision_window
 from ..services import face_dataset_service as svc
 from ..services import dataset_activity
+from ..services import refmod_service
 from ..services.dataset_storage import dataset_path, ensure_dataset_dir
 from ..services import lora_test_studio as lts
 from ..services import studio_grid_export as sge
@@ -1414,6 +1415,31 @@ def dataset_caption(dataset_id):
         # bleed into a later run (begin() also disarms defensively).
         dataset_activity.clear_cancel(dataset_id)
     return jsonify({'ok': True, 'captioned': n, 'stopped': stopped, 'engines': engines})
+
+
+@bp.post('/dataset/<int:dataset_id>/refmod')
+def dataset_refmod(dataset_id):
+    """Generate a MiniMax-H3 RefMod (.safetensors) from the dataset's kept images.
+
+    A reference bundle for the ComfyUI-MiniMaxH3Mod pack: ≤16 kept pictures
+    (6 face + 6 half + 4 full) VAE-encoded at 1024px into one identity mod.
+    The encode runs in the ComfyUI interpreter's torch through a worker script;
+    this route owns nothing past validation and the GPU window. Overwrites the
+    dataset's previous RefMod of the same name — the button is 'generate', and
+    the save is an atomic replace."""
+    ds = svc.get_dataset(LOCAL_USER, dataset_id)
+    if not ds:
+        return jsonify({'error': 'not found'}), 404
+    kept = [i for i in (ds.images or [])
+            if getattr(i, 'status', None) == 'keep' and getattr(i, 'filename', None)]
+    if not kept:
+        return jsonify({'error': 'no kept images to encode'}), 400
+    try:
+        with gpu_exclusive_vision_window(flag_ttl=600):
+            res = refmod_service.generate_for_dataset(ds)
+    except Exception as e:
+        return _map_error(e)
+    return jsonify({'ok': True, **res})
 
 
 @bp.post('/dataset/<int:dataset_id>/caption/cancel')
