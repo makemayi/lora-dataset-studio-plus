@@ -77,7 +77,7 @@ def main() -> None:
         vae.throw_exception_if_invalid()
 
         resolution = 1024
-        max_tokens = 8192
+        max_tokens = int(manifest.get('max_tokens') or 8192)
         first = load_image_file(images[0], max_edge=resolution * 2)
         h, w = first.shape[1], first.shape[2]
         scale = min(1.0, resolution / min(h, w))

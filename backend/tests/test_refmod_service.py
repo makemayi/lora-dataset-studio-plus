@@ -15,20 +15,42 @@ def _img(id_, status, framing, filename='f.webp'):
     return SimpleNamespace(id=id_, status=status, framing=framing, filename=filename)
 
 
-def test_pick_images_buckets_by_framing_with_caps():
+def test_pick_images_identity_first():
     from app.services import refmod_service as svc
 
-    rows = ([_img(i, 'keep', 'face') for i in range(10)]      # capped at 6
-            + [_img(100 + i, 'keep', 'half') for i in range(8)]   # capped at 6
-            + [_img(200 + i, 'keep', 'full') for i in range(3)]   # all 3
+    # 30 faces available: face-dominant, half only as secondary, NO fulls —
+    # full frames are the clothing carrier and clothing is what the user wants
+    # OUT of the reference.
+    rows = ([_img(i, 'keep', 'face') for i in range(30)]
+            + [_img(100 + i, 'keep', 'half') for i in range(8)]
+            + [_img(200 + i, 'keep', 'full') for i in range(5)]
             + [_img(300, 'pending', 'face'), _img(301, 'reject', 'half')])
     picked = svc.pick_images(rows)
-    assert len(picked) == 15
-    framings = [r.framing for r in picked]
-    assert framings.count('face') == 6
-    assert framings.count('half') == 6
-    assert framings.count('full') == 3
+    assert len(picked) == 16          # 12 face + 4 half (cap), 0 full
+    assert sum(r.framing == 'face' for r in picked) == 12
+    assert sum(r.framing == 'half' for r in picked) == 4
+    assert not any(r.framing == 'full' for r in picked)
     assert all(r.status == 'keep' for r in picked)
+
+
+def test_pick_images_tops_up_fulls_only_when_thin():
+    from app.services import refmod_service as svc
+
+    # 4 face + 1 half: fulls top the set up to the 6-row floor.
+    rows = ([_img(i, 'keep', 'face') for i in range(4)]
+            + [_img(50, 'keep', 'half')]
+            + [_img(100 + i, 'keep', 'full') for i in range(9)])
+    picked = svc.pick_images(rows)
+    assert len(picked) == 6
+    assert sum(r.framing == 'full' for r in picked) == 1
+
+
+def test_pick_images_full_only_dataset_takes_twelve():
+    from app.services import refmod_service as svc
+
+    rows = [_img(i, 'keep', None) for i in range(20)]   # no framing → full
+    picked = svc.pick_images(rows)
+    assert len(picked) == 12
 
 
 def test_pick_images_treats_unknown_framing_as_full():

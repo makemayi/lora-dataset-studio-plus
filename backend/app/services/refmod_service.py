@@ -21,10 +21,12 @@ from .. import config as cfg
 from ..models import FaceDatasetImage
 from ..services.dataset_storage import dataset_path
 
-# Per-framing picks: identity lives in close-ups, framing variety keeps the
-# latent from over-fitting one composition. Same rule as the local batch tool.
-_MAX_PER_FRAMING = (("face", 6), ("half", 6), ("full", 4))
-_TOKEN_BUDGET = 8192
+# Per-framing picks, identity-first: the face signal lives in close-ups and
+# half/full frames are what carry CLOTHING into the latent (the #1 complaint).
+# Ladder face → half → full tops up only when a dataset lacks close-ups.
+_MAX_FACE, _MAX_HALF = 12, 4
+_MIN_TOTAL = 6
+_TOKEN_BUDGET = 16384   # keeps every picked angle un-resampled (12×1024 + slack)
 _SUBPROCESS_TIMEOUT_S = 1800
 
 
@@ -77,18 +79,23 @@ def _vae_path(root: Path) -> Path:
 
 
 def pick_images(images) -> list:
-    """≤16 kept rows: 6 face + 6 half + 4 full (or whatever the dataset has).
-    Framings outside the training trio count as full."""
+    """Identity-first pick, ≤16 rows: up to 12 face close-ups, then half shots,
+    full frames only as top-up (they are the clothing carrier). Framings
+    outside the training trio count as full."""
     by: dict[str, list] = {'face': [], 'half': [], 'full': []}
     for row in images:
         if getattr(row, 'status', None) != 'keep' or not getattr(row, 'filename', None):
             continue
         framing = (getattr(row, 'framing', None) or 'full').lower()
         by.setdefault(framing, by['full']).append(row)
-    picked: list[str] = []
-    for framing, cap in _MAX_PER_FRAMING:
-        picked.extend(by[framing][:cap])
-    return picked
+    picked = by['face'][:_MAX_FACE] + by['half'][:_MAX_HALF]
+    if len(picked) < _MIN_TOTAL:
+        picked += by['full'][:_MIN_TOTAL - len(picked)]
+    if not (by['face'] or by['half']):
+        # A dataset with only full frames has no closer option — clothing is
+        # unavoidable there, so at least keep 12 angles for coverage.
+        picked = by['full'][:12]
+    return picked[:16]
 
 
 def _kept_rows(ds):
@@ -123,6 +130,7 @@ def generate_for_dataset(ds) -> dict:
         'output_dir': str(root / 'models' / 'refmods'),
         'name': f"minimaxh3_{_safe_name(ds.name, ds.id)}_v1_refmod",
         'description': f'identity baseline from LDS dataset {ds.id} ({ds.name})',
+        'max_tokens': _TOKEN_BUDGET,
     }
     os.makedirs(manifest['output_dir'], exist_ok=True)
 
