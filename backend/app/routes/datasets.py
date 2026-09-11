@@ -20,6 +20,7 @@ from ..gpu_window import gpu_exclusive_vision_window
 from ..services import face_dataset_service as svc
 from ..services import dataset_activity
 from ..services import refmod_service
+from ..services import vision_keepalive
 from ..services.dataset_storage import dataset_path, ensure_dataset_dir
 from ..services import lora_test_studio as lts
 from ..services import studio_grid_export as sge
@@ -1430,11 +1431,15 @@ def dataset_refmod(dataset_id):
     ds = svc.get_dataset(LOCAL_USER, dataset_id)
     if not ds:
         return jsonify({'error': 'not found'}), 404
+    data = request.get_json(silent=True) or {}
     try:
+        # mask=False 生成无遮罩基线（原命名）；默认带遮罩（名称加 _mask）。
         # Kept-image validation lives in the service (it owns the store query);
         # an empty pick raises ValueError -> 400 here.
+        vision_keepalive.revoke('refmod extraction')   # same gate as training
         with gpu_exclusive_vision_window(flag_ttl=600):
-            res = refmod_service.generate_for_dataset(ds)
+            res = refmod_service.generate_for_dataset(
+                ds, masked=bool(data.get('mask', True)))
     except Exception as e:
         return _map_error(e)
     return jsonify({'ok': True, **res})

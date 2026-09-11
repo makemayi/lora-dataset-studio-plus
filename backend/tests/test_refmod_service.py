@@ -135,6 +135,8 @@ def test_generate_for_dataset_parses_worker_json(tmp_path, monkeypatch):
 
     monkeypatch.setattr(svc.subprocess, 'run', fake_run)
     monkeypatch.setattr(svc, '_kept_rows', lambda d: d.images)
+    monkeypatch.setattr(svc.face_mask_service, 'generate_face_masks',
+                        lambda imgs, out_dir, expand=None, timeout=1800: {})
     monkeypatch.setattr(svc, '_comfy_root', lambda: tmp_path)
     monkeypatch.setattr(svc, '_python_exe', lambda root: tmp_path / 'py.exe')
     monkeypatch.setattr(svc, '_node_dir', lambda root: tmp_path / 'custom_nodes' / 'pack')
@@ -143,7 +145,7 @@ def test_generate_for_dataset_parses_worker_json(tmp_path, monkeypatch):
 
     res = svc.generate_for_dataset(ds)
     assert res['tokens'] == 8192 and res['frames'] == 8
-    assert seen['manifest']['name'] == 'minimaxh3_test_person_v1_refmod'
+    assert seen['manifest']['name'] == 'minimaxh3_test_person_v1_mask_refmod'
     assert len(seen['manifest']['images']) == 3
     assert all(str(ds.storage) in p for p in seen['manifest']['images'])
 
@@ -159,6 +161,8 @@ def test_worker_failure_raises_runtimeerror_with_stderr_tail(tmp_path, monkeypat
 
     monkeypatch.setattr(svc.subprocess, 'run', fake_run)
     monkeypatch.setattr(svc, '_kept_rows', lambda d: d.images)
+    monkeypatch.setattr(svc.face_mask_service, 'generate_face_masks',
+                        lambda imgs, out_dir, expand=None, timeout=1800: {})
     monkeypatch.setattr(svc, '_comfy_root', lambda: tmp_path)
     monkeypatch.setattr(svc, '_python_exe', lambda root: tmp_path / 'py.exe')
     monkeypatch.setattr(svc, '_node_dir', lambda root: tmp_path / 'custom_nodes' / 'pack')
@@ -183,6 +187,8 @@ def test_unsafe_dataset_name_sanitizes(tmp_path, monkeypatch):
 
     monkeypatch.setattr(svc.subprocess, 'run', fake_run)
     monkeypatch.setattr(svc, '_kept_rows', lambda d: d.images)
+    monkeypatch.setattr(svc.face_mask_service, 'generate_face_masks',
+                        lambda imgs, out_dir, expand=None, timeout=1800: {})
     monkeypatch.setattr(svc, '_comfy_root', lambda: tmp_path)
     monkeypatch.setattr(svc, '_python_exe', lambda root: tmp_path / 'py.exe')
     monkeypatch.setattr(svc, '_node_dir', lambda root: tmp_path / 'custom_nodes' / 'pack')
@@ -191,7 +197,7 @@ def test_unsafe_dataset_name_sanitizes(tmp_path, monkeypatch):
     svc.generate_for_dataset(ds)
     # CJK chars are isalnum() in Python — they survive; punctuation becomes '_'
     # and a trailing '_' is stripped by .strip('_').
-    assert seen['manifest']['name'] == 'minimaxh3_人世间_宋佳_v1_refmod'
+    assert seen['manifest']['name'] == 'minimaxh3_人世间_宋佳_v1_mask_refmod'
 
 
 # ── route, against the REAL models (the 500 regression) ──────────────────
@@ -244,8 +250,8 @@ def test_route_refmod_happy_path(app, client, monkeypatch):
                         lambda user, ds_id: SimpleNamespace(id=ds_id, name='x',
                                                             images=rows))
     monkeypatch.setattr(routes.refmod_service, 'generate_for_dataset',
-                        lambda ds: {'name': 'n', 'tokens': 10, 'frames': 2,
-                                    'path': 'p', 'mb': 0.2})
+                        lambda ds, masked=True: {'name': 'n', 'tokens': 10, 'frames': 2,
+                                                 'path': 'p', 'mb': 0.2, 'masked': 1})
     resp = client.post('/api/dataset/5/refmod')
     assert resp.status_code == 200
     body = resp.get_json()
@@ -294,7 +300,7 @@ def test_route_refmod_404_and_no_kept(app, client, monkeypatch):
     monkeypatch.setattr(routes.svc, 'get_dataset', lambda user, ds_id: None)
     assert client.post('/api/dataset/5/refmod').status_code == 404
 
-    def no_images(ds):
+    def no_images(ds, masked=True):
         raise ValueError('No kept images to encode.')
 
     monkeypatch.setattr(routes.svc, 'get_dataset',
@@ -309,7 +315,7 @@ def test_route_refmod_gpu_busy_maps_to_503(app, client, monkeypatch):
     from app.routes import datasets as routes
     from app.gpu_window import GpuBusyError
 
-    def fake_generate(ds):
+    def fake_generate(ds, masked=True):
         raise GpuBusyError('a vision task is already running')
 
     monkeypatch.setattr(routes.svc, 'get_dataset',

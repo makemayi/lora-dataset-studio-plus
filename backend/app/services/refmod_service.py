@@ -173,9 +173,13 @@ def _face_masks_for(image_paths, ds_id):
     return masks
 
 
-def generate_for_dataset(ds) -> dict:
+def generate_for_dataset(ds, masked=True) -> dict:
     """Encode ds's kept images into one RefMod. Synchronous (~1-3 min: the VAE
-    load dominates); the caller holds the GPU vision window."""
+    load dominates); the caller holds the GPU vision window.
+
+    ``masked=True`` applies face-mask suppression and names the output with a
+    ``_mask`` suffix; ``masked=False`` skips masks entirely so the plain-named
+    unmasked baseline stays available for A/B comparison."""
     root = _comfy_root()
     python_exe = _python_exe(root)
     node_dir = _node_dir(root)
@@ -186,8 +190,9 @@ def generate_for_dataset(ds) -> dict:
         raise ValueError('No kept images to encode.')
     storage = Path(dataset_path(ds.id))
     image_paths = [str(storage / row.filename) for row in picked]
-    masks = _face_masks_for(image_paths, ds.id)
+    masks = _face_masks_for(image_paths, ds.id) if masked else [None] * len(image_paths)
     masked_n = sum(1 for m in masks if m)
+    suffix = '_mask' if masked else ''
 
     worker = Path(__file__).with_name('refmod_extract_worker.py')
     manifest = {
@@ -195,12 +200,12 @@ def generate_for_dataset(ds) -> dict:
         'images': image_paths,
         'vae': str(vae_path),
         'output_dir': str(root / 'models' / 'refmods'),
-        'name': f"minimaxh3_{_safe_name(ds.name, ds.id)}_v1_refmod",
         'description': f'identity baseline from LDS dataset {ds.id} ({ds.name})',
         'max_tokens': _TOKEN_BUDGET,
         'masks': masks,
         'background_retention': _BACKGROUND_RETENTION,
     }
+    manifest['name'] = f"minimaxh3_{_safe_name(ds.name, ds.id)}_v1{suffix}_refmod"
     os.makedirs(manifest['output_dir'], exist_ok=True)
 
     proc = subprocess.run(  # noqa: S603 - fixed argv, no shell
