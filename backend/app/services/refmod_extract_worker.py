@@ -24,10 +24,35 @@ import json
 import os
 import sys
 
+import torch
+
 
 def _fail(message: str) -> None:
     print(json.dumps({"ok": False, "error": message}, ensure_ascii=True))
     sys.exit(1)
+
+
+def _load_face_mask(path: str, resolution: int, canvas):
+    """LDS face mask PNG (face=BLACK, background=WHITE) -> RefMod keep-mask
+    [1, th, tw] (face=1): the two conventions are inverted, so this flips the
+    values, then mirrors the image chain's resize (short edge -> canvas
+    center-crop) so mask and encoded pixels share one geometry."""
+    import numpy as np
+    from PIL import Image
+    with Image.open(path) as img:
+        arr = np.asarray(img.convert("L")).astype("float32") / 255.0
+    m = (1.0 - torch.from_numpy(arr)).clamp(0.0, 1.0)   # invert: face becomes 1
+    h, w = m.shape
+    scale = min(1.0, resolution / min(h, w))
+    if canvas is not None:
+        tw, th = canvas
+    else:
+        tw = max(32, round(w * scale / 32) * 32)
+        th = max(32, round(h * scale / 32) * 32)
+    mp = m.unsqueeze(0).unsqueeze(1)                    # [1, 1, h, w]
+    import comfy.utils
+    mp = comfy.utils.common_upscale(mp, tw, th, "bilinear", "center")
+    return mp.squeeze(1).clamp(0.0, 1.0)                # [1, th, tw]
 
 
 def main() -> None:
@@ -51,11 +76,14 @@ def main() -> None:
             _fail(f"missing path in manifest: {required}")
             return
 
-    if node_dir not in sys.path:
-        sys.path.insert(0, node_dir)
+    # Order matters: node_dir must WIN over the ComfyUI root — both ship a
+    # ``nodes`` module, and ComfyUI's own one has no _mask_latent (measured:
+    # the mask pass silently degraded to unmasked with the root first).
     comfy_root = os.path.abspath(os.path.join(node_dir, "..", ".."))
     if comfy_root not in sys.path:
         sys.path.insert(0, comfy_root)
+    if node_dir not in sys.path:
+        sys.path.insert(0, node_dir)
 
     try:
         import torch
@@ -66,6 +94,26 @@ def main() -> None:
         import comfy.model_management
         import comfy.sd
         import comfy.utils
+
+        # Face-mask suppression reuses the pack's own math (zero drift).
+        # nodes.py uses PACKAGE-RELATIVE imports (from .common, from .core...),
+        # so it must be loaded as a package — a bare ``from nodes import ...``
+        # dies with 'attempted relative import' (measured). If the load fails
+        # (ComfyUI API moved), masks degrade to unmasked.
+        _pack_mask_latent = None
+        try:
+            import importlib.util
+            _pkg_name = "lds_h3mod_pack"
+            _spec = importlib.util.spec_from_file_location(
+                _pkg_name, os.path.join(node_dir, "__init__.py"),
+                submodule_search_locations=[node_dir])
+            _pkg = importlib.util.module_from_spec(_spec)
+            sys.modules[_pkg_name] = _pkg
+            _spec.loader.exec_module(_pkg)
+            _pack_mask_latent = importlib.import_module(
+                f"{_pkg_name}.nodes")._mask_latent
+        except Exception as mask_import_error:  # noqa: BLE001
+            print(f"[extract] note: mask support unavailable ({mask_import_error})")
     except Exception as e:  # noqa: BLE001
         _fail(f"cannot import the RefMod node pack or ComfyUI: {e}")
         return
@@ -78,6 +126,8 @@ def main() -> None:
 
         resolution = 1024
         max_tokens = int(manifest.get('max_tokens') or 8192)
+        masks = manifest.get('masks') or []
+        background_retention = float(manifest.get('background_retention') or 0.0)
         first = load_image_file(images[0], max_edge=resolution * 2)
         h, w = first.shape[1], first.shape[2]
         scale = min(1.0, resolution / min(h, w))
@@ -85,11 +135,23 @@ def main() -> None:
                   max(32, round(h * scale / 32) * 32))
 
         frames, shapes = [], []
-        for path in images:
+        masked_n = 0
+        for i, path in enumerate(images):
             src = ensure_min_size(_resize_ref(load_image_file(path, max_edge=resolution * 2),
                                               resolution, canvas))
             with torch.no_grad():
                 z = vae.encode(src.to(device)).float().cpu()
+            mask_path = masks[i] if i < len(masks) else None
+            if mask_path and os.path.isfile(mask_path) and _pack_mask_latent is not None:
+                # Suppress everything outside the face toward a blurred copy of
+                # itself (background_retention=0 → clothing/skyline structure is
+                # erased at the latent, the documented "keep identity only" lever).
+                z = _pack_mask_latent(z, _load_face_mask(mask_path, resolution, canvas),
+                                      background_retention, name)
+                masked_n += 1
+            elif mask_path:
+                print(f"[extract] note: no mask support — {os.path.basename(path)} "
+                      f"encoded unmasked")
             frames.append(z.to(torch.float16))
             shapes.append(f"{z.shape[2]}x{z.shape[3]}x{z.shape[4]}")
 
@@ -110,7 +172,8 @@ def main() -> None:
         saved = mod.save(mod.path)
         mb = latent.numel() * latent.element_size() / 1024 / 1024
         print(json.dumps({"ok": True, "tokens": mod.token_count, "frames": total_t,
-                          "path": saved, "mb": round(mb, 2)}, ensure_ascii=True))
+                          "path": saved, "mb": round(mb, 2), "masked": masked_n},
+                         ensure_ascii=True))
     except Exception as e:  # noqa: BLE001
         _fail(f"{type(e).__name__}: {e}")
 

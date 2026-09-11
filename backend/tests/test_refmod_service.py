@@ -5,6 +5,7 @@ The subprocess is the unit boundary: every test here stubs
 (service tests) — no torch, no ComfyUI, no real VAE.
 """
 import json
+import os
 from types import SimpleNamespace
 
 import pytest
@@ -249,6 +250,42 @@ def test_route_refmod_happy_path(app, client, monkeypatch):
     assert resp.status_code == 200
     body = resp.get_json()
     assert body['ok'] is True and body['tokens'] == 10
+
+
+def test_face_masks_align_and_degrade(tmp_path, monkeypatch):
+    """'masked' entries get their PNG path, everything else None — and an
+    unavailable detector degrades to all-None instead of failing the run."""
+    from app.services import refmod_service as svc
+
+    paths = [str(tmp_path / f'img{i}.png') for i in range(3)]
+    for p in paths:
+        open(p, 'wb').close()
+    mask_dir = tmp_path / 'masks' / 'refmod' / '9'
+    mask_dir.mkdir(parents=True)
+    for i in (0, 2):   # img1 = 'no_face'
+        (mask_dir / f'img{i}.png').write_bytes(b'x')
+
+    calls = {}
+
+    def fake_generate(imgs, out_dir, expand=None, timeout=1800):
+        calls['imgs'] = list(imgs)
+        calls['out_dir'] = out_dir
+        return {'ok': True, 'written': 2, 'results': {
+            paths[0]: {'state': 'masked'},
+            paths[1]: {'state': 'no_face'},
+            paths[2]: {'state': 'masked'}}}
+
+    monkeypatch.setattr(svc.face_mask_service, 'generate_face_masks', fake_generate)
+    monkeypatch.setattr(svc, 'dataset_path', lambda ds_id: str(tmp_path / 'datasets' / 'ds'))
+    masks = svc._face_masks_for(paths, ds_id=9)
+    assert calls['imgs'] == paths and calls['out_dir'].endswith(os.path.join('refmod', '9'))
+    assert masks[0] == str(mask_dir / 'img0.png')
+    assert masks[1] is None
+    assert masks[2] == str(mask_dir / 'img2.png')
+
+    monkeypatch.setattr(svc.face_mask_service, 'generate_face_masks',
+                        lambda imgs, out_dir, expand=None, timeout=1800: {})
+    assert svc._face_masks_for(paths, ds_id=9) == [None, None, None]
 
 
 def test_route_refmod_404_and_no_kept(app, client, monkeypatch):

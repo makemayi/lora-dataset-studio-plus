@@ -19,6 +19,7 @@ from pathlib import Path
 
 from .. import config as cfg
 from ..models import FaceDatasetImage
+from ..services import face_mask as face_mask_service
 from ..services.dataset_storage import dataset_path
 
 # Per-framing picks, identity-first: the face signal lives in close-ups and
@@ -27,6 +28,8 @@ from ..services.dataset_storage import dataset_path
 _MAX_FACE, _MAX_HALF = 12, 4
 _MIN_TOTAL = 6
 _TOKEN_BUDGET = 16384   # keeps every picked angle un-resampled (12×1024 + slack)
+_BACKGROUND_RETENTION = 0.0   # outside the face mask collapses to a blurred copy
+_MASKS_DIR_NAME = 'refmod'
 _SUBPROCESS_TIMEOUT_S = 1800
 
 
@@ -108,6 +111,68 @@ def _kept_rows(ds):
             .all())
 
 
+def _draw_identity_mask(image_path, boxes, out_dir, expand=2.0):
+    """Write a face mask for a 'too_large' frame: same dilate_box + ellipse +
+    feather math as face_mask_infer (LDS convention, face=BLACK), but WITHOUT
+    the 0.5-coverage refusal — a face crop where the face fills the frame is
+    exactly the identity-dense image this feature must mask. Returns the PNG
+    path or None."""
+    import numpy as np
+    from PIL import Image, ImageDraw, ImageFilter
+    with Image.open(image_path) as img:
+        w, h = img.size
+    shift_up, feather_frac = 0.10, 0.03
+    mask = Image.new('L', (w, h), 255)
+    draw = ImageDraw.Draw(mask)
+    for b in boxes or []:
+        x1, y1, x2, y2 = b
+        cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0 - (y2 - y1) * shift_up
+        hw, hh = (x2 - x1) * expand / 2.0, (y2 - y1) * expand / 2.0
+        draw.ellipse([(cx - hw) * w, (cy - hh) * h, (cx + hw) * w, (cy + hh) * h], fill=0)
+    r = max(1, int(min(w, h) * feather_frac))
+    mask = mask.filter(ImageFilter.GaussianBlur(radius=r))
+    name = os.path.splitext(os.path.basename(image_path))[0] + '.png'
+    out = os.path.join(out_dir, 'identity_' + name)
+    mask.save(out, 'PNG')
+    return out
+
+
+def _face_masks_for(image_paths, ds_id):
+    """Face-mask PNG per picked image (None where no confident face), via the
+    same InsightFace pass masked training uses. LDS mask convention is face=BLACK
+    / background=WHITE; the worker inverts to the RefMod keep=1 convention.
+    Unavailable detection degrades to no masks — an unmasked RefMod is still a
+    valid RefMod, it just carries what the frame carries."""
+    if not image_paths:
+        return [None] * len(image_paths)
+    out_dir = os.path.join(os.path.dirname(dataset_path(ds_id)), os.pardir,
+                           'masks', _MASKS_DIR_NAME, str(ds_id))
+    out_dir = os.path.abspath(out_dir)
+    try:
+        result = face_mask_service.generate_face_masks(image_paths, out_dir)
+    except Exception:  # noqa: BLE001 - masks are an enhancement, never a gate
+        return [None] * len(image_paths)
+    results = (result or {}).get('results') or {}
+    masks = []
+    for p in image_paths:
+        entry = results.get(p) or {}
+        state = entry.get('state')
+        stem = os.path.splitext(os.path.basename(p))[0]
+        mask_path = os.path.join(out_dir, stem + '.png')
+        if state == 'masked' and os.path.isfile(mask_path):
+            masks.append(mask_path)
+        elif state == 'too_large' and entry.get('boxes'):
+            # The training-oriented 0.5-coverage cap refuses exactly the
+            # face-filling close-ups identity needs; redraw without the cap.
+            try:
+                masks.append(_draw_identity_mask(p, entry['boxes'], out_dir))
+            except OSError:
+                masks.append(None)
+        else:
+            masks.append(None)
+    return masks
+
+
 def generate_for_dataset(ds) -> dict:
     """Encode ds's kept images into one RefMod. Synchronous (~1-3 min: the VAE
     load dominates); the caller holds the GPU vision window."""
@@ -121,6 +186,8 @@ def generate_for_dataset(ds) -> dict:
         raise ValueError('No kept images to encode.')
     storage = Path(dataset_path(ds.id))
     image_paths = [str(storage / row.filename) for row in picked]
+    masks = _face_masks_for(image_paths, ds.id)
+    masked_n = sum(1 for m in masks if m)
 
     worker = Path(__file__).with_name('refmod_extract_worker.py')
     manifest = {
@@ -131,6 +198,8 @@ def generate_for_dataset(ds) -> dict:
         'name': f"minimaxh3_{_safe_name(ds.name, ds.id)}_v1_refmod",
         'description': f'identity baseline from LDS dataset {ds.id} ({ds.name})',
         'max_tokens': _TOKEN_BUDGET,
+        'masks': masks,
+        'background_retention': _BACKGROUND_RETENTION,
     }
     os.makedirs(manifest['output_dir'], exist_ok=True)
 
@@ -150,7 +219,7 @@ def generate_for_dataset(ds) -> dict:
         raise RuntimeError(f'RefMod extraction failed: {detail}')
     return {'name': manifest['name'], 'tokens': result.get('tokens'),
             'frames': result.get('frames'), 'path': result.get('path'),
-            'mb': result.get('mb')}
+            'mb': result.get('mb'), 'masked': result.get('masked', 0)}
 
 
 def _safe_name(name: str, ds_id: int) -> str:
