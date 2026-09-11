@@ -1430,11 +1430,9 @@ def dataset_refmod(dataset_id):
     ds = svc.get_dataset(LOCAL_USER, dataset_id)
     if not ds:
         return jsonify({'error': 'not found'}), 404
-    kept = [i for i in (ds.images or [])
-            if getattr(i, 'status', None) == 'keep' and getattr(i, 'filename', None)]
-    if not kept:
-        return jsonify({'error': 'no kept images to encode'}), 400
     try:
+        # Kept-image validation lives in the service (it owns the store query);
+        # an empty pick raises ValueError -> 400 here.
         with gpu_exclusive_vision_window(flag_ttl=600):
             res = refmod_service.generate_for_dataset(ds)
     except Exception as e:

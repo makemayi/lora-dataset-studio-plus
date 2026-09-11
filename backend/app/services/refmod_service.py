@@ -18,6 +18,7 @@ import subprocess
 from pathlib import Path
 
 from .. import config as cfg
+from ..models import FaceDatasetImage
 from ..services.dataset_storage import dataset_path
 
 # Per-framing picks: identity lives in close-ups, framing variety keeps the
@@ -90,6 +91,16 @@ def pick_images(images) -> list:
     return picked
 
 
+def _kept_rows(ds):
+    """The dataset's kept rows with files. FaceDataset has no images
+    relationship — the store is queried by dataset_id, like everywhere else
+    (measured: an ``ds.images`` guess 500s the whole route)."""
+    return (FaceDatasetImage.query
+            .filter_by(dataset_id=ds.id, status='keep')
+            .filter(FaceDatasetImage.filename.isnot(None))
+            .all())
+
+
 def generate_for_dataset(ds) -> dict:
     """Encode ds's kept images into one RefMod. Synchronous (~1-3 min: the VAE
     load dominates); the caller holds the GPU vision window."""
@@ -98,9 +109,9 @@ def generate_for_dataset(ds) -> dict:
     node_dir = _node_dir(root)
     vae_path = _vae_path(root)
 
-    picked = pick_images(ds.images)
+    picked = pick_images(_kept_rows(ds))
     if not picked:
-        raise ValueError('No kept images with files to encode.')
+        raise ValueError('No kept images to encode.')
     storage = Path(dataset_path(ds.id))
     image_paths = [str(storage / row.filename) for row in picked]
 

@@ -111,6 +111,7 @@ def test_generate_for_dataset_parses_worker_json(tmp_path, monkeypatch):
              'mb': 1.5}).encode('utf-8'), stderr=b'')
 
     monkeypatch.setattr(svc.subprocess, 'run', fake_run)
+    monkeypatch.setattr(svc, '_kept_rows', lambda d: d.images)
     monkeypatch.setattr(svc, '_comfy_root', lambda: tmp_path)
     monkeypatch.setattr(svc, '_python_exe', lambda root: tmp_path / 'py.exe')
     monkeypatch.setattr(svc, '_node_dir', lambda root: tmp_path / 'custom_nodes' / 'pack')
@@ -134,6 +135,7 @@ def test_worker_failure_raises_runtimeerror_with_stderr_tail(tmp_path, monkeypat
                                stderr='Traceback ... GatedRepoError: 401'.encode('utf-8'))
 
     monkeypatch.setattr(svc.subprocess, 'run', fake_run)
+    monkeypatch.setattr(svc, '_kept_rows', lambda d: d.images)
     monkeypatch.setattr(svc, '_comfy_root', lambda: tmp_path)
     monkeypatch.setattr(svc, '_python_exe', lambda root: tmp_path / 'py.exe')
     monkeypatch.setattr(svc, '_node_dir', lambda root: tmp_path / 'custom_nodes' / 'pack')
@@ -157,6 +159,7 @@ def test_unsafe_dataset_name_sanitizes(tmp_path, monkeypatch):
             stderr=b'')
 
     monkeypatch.setattr(svc.subprocess, 'run', fake_run)
+    monkeypatch.setattr(svc, '_kept_rows', lambda d: d.images)
     monkeypatch.setattr(svc, '_comfy_root', lambda: tmp_path)
     monkeypatch.setattr(svc, '_python_exe', lambda root: tmp_path / 'py.exe')
     monkeypatch.setattr(svc, '_node_dir', lambda root: tmp_path / 'custom_nodes' / 'pack')
@@ -166,6 +169,46 @@ def test_unsafe_dataset_name_sanitizes(tmp_path, monkeypatch):
     # CJK chars are isalnum() in Python — they survive; punctuation becomes '_'
     # and a trailing '_' is stripped by .strip('_').
     assert seen['manifest']['name'] == 'minimaxh3_人世间_宋佳_v1_refmod'
+
+
+# ── route, against the REAL models (the 500 regression) ──────────────────
+def test_route_works_against_real_models(app, client, tmp_path, monkeypatch):
+    """A dataset built through the real ORM — no SimpleNamespace anywhere —
+    must reach the worker. Guards the regression where the route read a
+    ``ds.images`` relationship that FaceDataset does not have (live 500)."""
+    with app.app_context():
+        from app.extensions import db
+        from app.models import FaceDataset, FaceDatasetImage
+        from app.routes import datasets as routes
+        from app.services import refmod_service as svc
+
+        d = FaceDataset(user_id='local', name='RefModLive', trigger_word='rm00001')
+        db.session.add(d)
+        db.session.commit()
+        db.session.add(FaceDatasetImage(dataset_id=d.id, filename='a.png',
+                                        status='keep', framing='face'))
+        db.session.commit()
+        ds_id = d.id
+
+        seen = {}
+
+        def fake_run(argv, input=None, capture_output=True, timeout=None, env=None):
+            seen['manifest'] = json.loads(input.decode('utf-8'))
+            return SimpleNamespace(returncode=0, stdout=json.dumps(
+                {'ok': True, 'tokens': 256, 'frames': 1, 'path': 'o',
+                 'mb': 0.1}).encode('utf-8'), stderr=b'')
+
+        monkeypatch.setattr(svc.subprocess, 'run', fake_run)
+        monkeypatch.setattr(svc, '_comfy_root', lambda: tmp_path)
+        monkeypatch.setattr(svc, '_python_exe', lambda root: tmp_path / 'py.exe')
+        monkeypatch.setattr(svc, '_node_dir', lambda root: tmp_path / 'pack')
+        monkeypatch.setattr(svc, '_vae_path', lambda root: tmp_path / 'h3.safetensors')
+
+        resp = client.post(f'/api/dataset/{ds_id}/refmod')
+        assert resp.status_code == 200, resp.get_data(as_text=True)[:300]
+        body = resp.get_json()
+        assert body['ok'] is True and body['frames'] == 1
+        assert len(seen['manifest']['images']) == 1
 
 
 # ── route ─────────────────────────────────────────────────────────────────────
@@ -192,25 +235,26 @@ def test_route_refmod_404_and_no_kept(app, client, monkeypatch):
     monkeypatch.setattr(routes.svc, 'get_dataset', lambda user, ds_id: None)
     assert client.post('/api/dataset/5/refmod').status_code == 404
 
+    def no_images(ds):
+        raise ValueError('No kept images to encode.')
+
     monkeypatch.setattr(routes.svc, 'get_dataset',
-                        lambda user, ds_id: SimpleNamespace(id=ds_id, name='x', images=[]))
+                        lambda user, ds_id: SimpleNamespace(id=ds_id, name='x'))
+    monkeypatch.setattr(routes.refmod_service, 'generate_for_dataset', no_images)
     resp = client.post('/api/dataset/5/refmod')
     assert resp.status_code == 400
-    assert 'no kept images' in resp.get_json()['error']
+    assert 'No kept images' in resp.get_json()['error']
 
 
 def test_route_refmod_gpu_busy_maps_to_503(app, client, monkeypatch):
     from app.routes import datasets as routes
     from app.gpu_window import GpuBusyError
 
-    rows = [SimpleNamespace(id=1, status='keep', framing=None, filename='a.webp')]
-    monkeypatch.setattr(routes.svc, 'get_dataset',
-                        lambda user, ds_id: SimpleNamespace(id=ds_id, name='x',
-                                                            images=rows))
-
     def fake_generate(ds):
         raise GpuBusyError('a vision task is already running')
 
+    monkeypatch.setattr(routes.svc, 'get_dataset',
+                        lambda user, ds_id: SimpleNamespace(id=ds_id, name='x'))
     monkeypatch.setattr(routes.refmod_service, 'generate_for_dataset', fake_generate)
     resp = client.post('/api/dataset/5/refmod')
     assert resp.status_code == 503
