@@ -574,3 +574,42 @@ def test_pick_images_frontal_first_avoids_occluded():
     faces = [r.id for r in svc.pick_images(rows) if r.framing == 'face']
     assert faces == [2, 6, 1, 3, 4], faces
     assert 5 not in faces, 'a no_face row is not a face reference'
+
+
+def test_identity_hint_composes_prefix_and_description(app, tmp_path, monkeypatch):
+    """prompt_hint = the unified subject prefix + what the vision model saw
+    (features/hairstyle/skin/moles), driven by the best FACE frame."""
+    import os
+    from PIL import Image
+    from types import SimpleNamespace
+    from app.services import refmod_service as svc
+    from app.services.dataset_storage import dataset_path
+    from app.models import FaceDataset
+    from app.extensions import db
+
+    with app.app_context():
+        ds = FaceDataset(name='joyce', trigger_word='t')
+        db.session.add(ds)
+        db.session.commit()
+        ddir = dataset_path(ds.id)
+        os.makedirs(ddir, exist_ok=True)
+        paths = []
+        for name in ('a.png', 'b.png'):
+            Image.new('RGB', (32, 32)).save(os.path.join(ddir, name))
+            paths.append(os.path.join(ddir, name))
+        picked = [SimpleNamespace(framing='face'), SimpleNamespace(framing='bust')]
+
+        monkeypatch.setattr(svc, '_llama_describe',
+                            lambda p, prompt, timeout=180:
+                            '圆脸，单眼皮，肤色白皙，左眼角有一颗痣')
+        hint, note = svc._identity_hint(ds, paths, picked, note='')
+        assert note == ''
+        assert hint == ('<Subject 1>是一名名叫joyce 的中国女性，'
+                        '圆脸，单眼皮，肤色白皙，左眼角有一颗痣。'), hint
+        assert '脸' not in note and 'hint' not in note
+
+        # vision silent → degrade to the bare prefix, never fail the run
+        monkeypatch.setattr(svc, '_llama_describe', lambda p, prompt, timeout=180: '')
+        hint2, note2 = svc._identity_hint(ds, paths, picked, note='')
+        assert hint2 == '<Subject 1>是一名名叫joyce 的中国女性'
+        assert 'identity hint unavailable' in note2

@@ -13,9 +13,13 @@ with the remedy in the text — the toast shows it verbatim.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 import subprocess
+import urllib.request
+
+logger = logging.getLogger(__name__)
 from pathlib import Path
 
 from .. import config as cfg
@@ -425,6 +429,74 @@ def _fill_from_pending(ds, by, note):
     return total, note
 
 
+_HINT_PROMPT = (
+    '只根据这张人脸照片，用中文客观描述这个人的稳定身份特征，供绘画提示词使用：'
+    '脸部特征（脸型、眼、鼻、唇）、发型与发色、肤色、明显的脸部特征点（如痣、雀斑、疤痕）。'
+    '不要描述表情、情绪、背景、服装和摄影风格；不要评价美丑；用逗号分隔的短语，40字以内。')
+
+
+_LLAMA_BASE = 'http://127.0.0.1:8080'   # the local llama.cpp llama-server
+
+
+def _llama_describe(image_path, prompt, timeout=180):
+    """Describe an image through the local llama-server (OpenAI-compatible;
+    vision via a base64 image_url part — NOT Ollama, per the user's stack).
+    Model auto-picked from /v1/models (the multi-model server rejects an
+    unnamed request); thinking models spend small budgets on
+    reasoning_content, so that field is the fallback. Returns '' on any
+    failure — the hint degrades to its prefix."""
+    import base64
+    with open(image_path, 'rb') as f:
+        b64 = base64.b64encode(f.read()).decode('ascii')
+    try:
+        with urllib.request.urlopen(f'{_LLAMA_BASE}/v1/models', timeout=10) as r:
+            models = json.load(r).get('data') or []
+        model = next((m['id'] for m in models if m.get('id')), '')
+        if not model:
+            return ''
+        body = json.dumps({
+            'model': model, 'max_tokens': 500, 'temperature': 0.3,
+            'stream': False,
+            'messages': [{'role': 'user', 'content': [
+                {'type': 'text', 'text': prompt},
+                {'type': 'image_url',
+                 'image_url': {'url': f'data:image/png;base64,{b64}'}}]}]},
+            ensure_ascii=False).encode('utf-8')
+        req = urllib.request.Request(
+            f'{_LLAMA_BASE}/v1/chat/completions', data=body,
+            headers={'Content-Type': 'application/json'})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            msg = (json.load(r).get('choices') or [{}])[0].get('message') or {}
+        return (msg.get('content') or msg.get('reasoning_content') or '').strip()
+    except Exception as e:                                       # noqa: BLE001
+        logger.warning('refmod: llama describe failed: %s', e)
+        return ''
+
+
+def _identity_hint(ds, image_paths, picked, note):
+    """Build the prompt_hint: a one-line identity description (facial features,
+    hairstyle, skin tone, marks like moles) prefixed with the subject tag, e.g.
+    ``<Subject 1>是一名名叫Joyce 的中国女性，…``. Best kept FACE frame drives the
+    vision call (Ollama, best-effort); a silent/unavailable model degrades to
+    the bare prefix — a hint that only half-exists still composes a prompt.
+    Returns (hint, note)."""
+    prefix = f'<Subject 1>是一名名叫{ds.name} 的中国女性'
+    faces = [p for p, r in zip(image_paths, picked)
+             if (r.framing or '') == 'face']
+    target = (faces or image_paths)[:1]
+    if not target:
+        return prefix, note
+    try:
+        desc = _llama_describe(target[0], _HINT_PROMPT)
+    except Exception as e:                                       # noqa: BLE001
+        logger.warning('refmod: identity hint unavailable: %s', e)
+        desc = ''
+    if not desc:
+        note += '; identity hint unavailable (vision model silent) — prefix only'
+        return prefix, note
+    return f'{prefix}，{desc.strip().rstrip("。")}。', note
+
+
 def generate_for_dataset(ds, masked=False) -> dict:
     """Encode ds's kept images into one RefMod. Synchronous (~1-3 min: the VAE
     load dominates); the caller holds the GPU vision window.
@@ -486,6 +558,9 @@ def _generate_for_dataset(ds, masked=False) -> dict:
         'masks': masks,
         'background_retention': _BACKGROUND_RETENTION,
     }
+    hint, note = _identity_hint(ds, image_paths, picked, note)
+    manifest['description'] = (f'identity baseline from LDS dataset '
+                              f'{ds.id} ({ds.name}) | {hint}')
     manifest['name'] = f"minimaxh3_{_safe_name(ds.name, ds.id)}_v1{suffix}_refmod"
     os.makedirs(manifest['output_dir'], exist_ok=True)
 
@@ -504,7 +579,15 @@ def _generate_for_dataset(ds, masked=False) -> dict:
     if proc.returncode != 0 or not result.get('ok'):
         detail = result.get('error') or proc.stderr.decode('utf-8', 'replace')[-400:]
         raise RuntimeError(f'RefMod extraction failed: {detail}')
-    return {'name': manifest['name'], 'tokens': result.get('tokens'),
+    try:
+        with open(os.path.join(manifest['output_dir'],
+                               manifest['name'] + '_prompt_hint.txt'),
+                  'w', encoding='utf-8') as f:
+            f.write(hint)
+    except OSError:
+        pass
+    return {'name': manifest['name'], 'prompt_hint': hint,
+            'tokens': result.get('tokens'),
             'frames': result.get('frames'), 'path': result.get('path'),
             'mb': result.get('mb'), 'masked': result.get('masked', 0),
             'note': note.strip('; ')}
