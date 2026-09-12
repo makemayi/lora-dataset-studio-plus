@@ -15,7 +15,7 @@ and writes the RefMod, then prints ONE json line on stdout:
 
 Any failure prints {"ok": false, "error": "..."} and exits 1. The encode flow
 mirrors the node pack's own extract_mod.py (encode mode, 1024px short edge,
-fp16 latents, 8192-token budget) — one implementation per runtime, by design:
+fp16 latents, max_tokens budget from the manifest) — one implementation per runtime, by design:
 this file runs where torch lives, extract_mod.py is the pack's CLI.
 """
 from __future__ import annotations

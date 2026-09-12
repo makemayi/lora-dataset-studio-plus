@@ -26,9 +26,8 @@ from ..services.dataset_storage import dataset_path
 # Per-framing picks, identity-first: the face signal lives in close-ups and
 # half/full frames are what carry CLOTHING into the latent (the #1 complaint).
 # Ladder face → half → full tops up only when a dataset lacks close-ups.
-_MAX_FACE, _MAX_HALF = 12, 4
-_MIN_TOTAL = 6
-_TOKEN_BUDGET = 16384   # keeps every picked angle un-resampled (12×1024 + slack)
+_MAX_FACE, _MAX_HALF, _MAX_FULL = 12, 4, 4
+_TOKEN_BUDGET = 20480   # keeps every picked angle un-resampled (20×1024)
 _BACKGROUND_RETENTION = 0.0   # outside the face mask collapses to a blurred copy
 _MASKS_DIR_NAME = 'refmod'
 _SUBPROCESS_TIMEOUT_S = 1800
@@ -89,12 +88,15 @@ def _vae_path(root: Path) -> Path:
 
 
 def pick_images(images) -> list:
-    """Identity-first pick, ≤16 rows: up to 12 face close-ups (yaw-spread), then
-    half shots, full frames only as top-up (they are the clothing carrier).
-    House framing mapping (Bank build's): face→face, bust→half, body→full;
-    a back view is not an identity reference and is never picked. Inside a
-    bucket, scored rows lead (face_score DESC) and the face bucket is spread
-    across head angles instead of following import order."""
+    """Identity-first pick, ≤20 rows: up to 12 face close-ups (yaw-spread),
+    4 half shots and 4 full frames — the figure and clothing ride to the mod
+    too, so fulls are ALWAYS taken when the dataset has them (they are not a
+    thin-set fallback any more; a thin set is whatever it is — every kept row
+    is already in). House framing mapping (Bank build's): face→face,
+    bust→half, body→full; a back view is not an identity reference and is
+    never picked. Inside a bucket, scored rows lead (face_score DESC) and the
+    face bucket is spread across head angles instead of following import
+    order."""
     by: dict[str, list] = {'face': [], 'half': [], 'full': []}
     for row in images:
         if getattr(row, 'status', None) != 'keep' or not getattr(row, 'filename', None):
@@ -105,14 +107,13 @@ def pick_images(images) -> list:
         by[{'face': 'face', 'bust': 'half'}.get(fr, 'full')].append(row)
     for bucket in by.values():
         bucket.sort(key=lambda r: (r.face_score is None, -(r.face_score or 0), r.id))
-    picked = _yaw_spread(by['face'], _MAX_FACE) + by['half'][:_MAX_HALF]
-    if len(picked) < _MIN_TOTAL:
-        picked += by['full'][:_MIN_TOTAL - len(picked)]
+    picked = (_yaw_spread(by['face'], _MAX_FACE)
+              + by['half'][:_MAX_HALF] + by['full'][:_MAX_FULL])
     if not (by['face'] or by['half']):
         # A dataset with only full frames has no closer option — clothing is
         # unavoidable there, so at least keep 12 angles for coverage.
         picked = by['full'][:12]
-    return picked[:16]
+    return picked[:_MAX_FACE + _MAX_HALF + _MAX_FULL]
 
 
 def _yaw_spread(rows, limit):

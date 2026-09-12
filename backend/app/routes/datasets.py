@@ -1422,8 +1422,8 @@ def dataset_caption(dataset_id):
 def dataset_refmod(dataset_id):
     """Generate a MiniMax-H3 RefMod (.safetensors) from the dataset's kept images.
 
-    A reference bundle for the ComfyUI-MiniMaxH3Mod pack: ≤16 kept pictures
-    (6 face + 6 half + 4 full) VAE-encoded at 1024px into one identity mod.
+    A reference bundle for the ComfyUI-MiniMaxH3Mod pack: ≤20 kept pictures
+    (12 face + 4 bust + 4 full) VAE-encoded at 1024px into one identity mod.
     The encode runs in the ComfyUI interpreter's torch through a worker script;
     this route owns nothing past validation and the GPU window. Overwrites the
     dataset's previous RefMod of the same name — the button is 'generate', and

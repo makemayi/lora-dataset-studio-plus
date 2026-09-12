@@ -23,31 +23,32 @@ def _img(id_, status, framing, filename='f.webp', face_score=None, face_yaw=None
 def test_pick_images_identity_first():
     from app.services import refmod_service as svc
 
-    # 30 faces available: face-dominant, half only as secondary, NO fulls —
-    # full frames are the clothing carrier and clothing is what the user wants
-    # OUT of the reference.
+    # 30 faces available: face-dominant, bust secondary, fulls carry the
+    # figure/clothing — 4 of them ride along whenever the dataset has them.
     rows = ([_img(i, 'keep', 'face') for i in range(30)]
             + [_img(100 + i, 'keep', 'bust') for i in range(8)]
             + [_img(200 + i, 'keep', 'full') for i in range(5)]
             + [_img(300, 'pending', 'face'), _img(301, 'reject', 'half')])
     picked = svc.pick_images(rows)
-    assert len(picked) == 16          # 12 face + 4 half (cap), 0 full
+    assert len(picked) == 20          # 12 face + 4 bust + 4 full
     assert sum(r.framing == 'face' for r in picked) == 12
     assert sum(r.framing == 'bust' for r in picked) == 4
-    assert not any(r.framing == 'full' for r in picked)
+    assert sum(r.framing == 'full' for r in picked) == 4,         'the figure/clothing rides to the mod — fulls are always taken'
     assert all(r.status == 'keep' for r in picked)
 
 
-def test_pick_images_tops_up_fulls_only_when_thin():
+def test_pick_images_fulls_up_to_four_even_when_thin():
     from app.services import refmod_service as svc
 
-    # 4 face + 1 half: fulls top the set up to the 6-row floor.
+    # 4 face + 1 bust + 9 fulls: 4 fulls ride along (body/clothing coverage);
+    # the set is 9 — above the old 6-row floor, so no extra top-up happens.
     rows = ([_img(i, 'keep', 'face') for i in range(4)]
             + [_img(50, 'keep', 'bust')]
             + [_img(100 + i, 'keep', 'full') for i in range(9)])
     picked = svc.pick_images(rows)
-    assert len(picked) == 6
-    assert sum(r.framing == 'full' for r in picked) == 1
+    assert len(picked) == 9
+    assert sum(r.framing == 'full' for r in picked) == 4
+
 
 
 def test_pick_images_full_only_dataset_takes_twelve():
