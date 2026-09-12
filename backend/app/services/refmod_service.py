@@ -220,6 +220,7 @@ def _harvest_face_crops(ds, sources, deficit, note):
     if not sources:
         return [], note
     paths = [str(Path(dataset_path(ds.id)) / r.filename) for r in sources]
+    set_refmod_stage(ds.id, 'detecting faces')
     det = face_mask_service.detect_faces(paths)
     if not det.get('ok'):
         return [], (note + f'; face detection unavailable ({det.get("error", "?")}) — no crops')
@@ -267,6 +268,7 @@ def _harvest_face_crops(ds, sources, deficit, note):
                 if r_ - l < _CROP_MIN_SIDE or b_ - t < _CROP_MIN_SIDE:
                     continue
                 crop = im.convert('RGB').crop((l, t, r_, b_))
+            set_refmod_stage(ds.id, 'cropping faces')
             if tmp_in is None:
                 import tempfile
                 tmp_in = tempfile.mkdtemp(prefix='lds-refmod-crops-')
@@ -298,6 +300,7 @@ def _harvest_face_crops(ds, sources, deficit, note):
         for path, px in crop_face_px.items():
             by_val.setdefault(topaz_helper.face_recovery_value(px), []).append(path)
         for value, crop_paths in sorted(by_val.items(), key=lambda kv: str(kv[0])):
+            set_refmod_stage(ds.id, f'upscaling crops (Topaz, {len(crop_paths)} left)')
             tier_dir = os.path.join(tmp_in, f'v{value}')
             os.makedirs(tier_dir, exist_ok=True)
             for p in crop_paths:
@@ -342,6 +345,27 @@ def _harvest_face_crops(ds, sources, deficit, note):
     return face_rows + out_rows, note
 
 
+# -- live stage progress ------------------------------------------------------
+# The generation route is SYNCHRONOUS (the VAE load dominates, ~1-3 min), so
+# there is no job row to poll. The frontend instead polls the tiny progress
+# endpoint below while its request is in flight; the current stage lives in
+# this process-local dict (single-process Flask, one generation per GPU window
+# thanks to the exclusive vision window — no cross-process registry needed).
+_STAGES: dict[int, str] = {}
+
+
+def set_refmod_stage(ds_id, stage):
+    """Publish the current generation stage (None clears it)."""
+    if stage:
+        _STAGES[int(ds_id)] = stage
+    else:
+        _STAGES.pop(int(ds_id), None)
+
+
+def current_stage(ds_id):
+    return _STAGES.get(int(ds_id))
+
+
 def generate_for_dataset(ds, masked=True) -> dict:
     """Encode ds's kept images into one RefMod. Synchronous (~1-3 min: the VAE
     load dominates); the caller holds the GPU vision window.
@@ -349,6 +373,14 @@ def generate_for_dataset(ds, masked=True) -> dict:
     ``masked=True`` applies face-mask suppression and names the output with a
     ``_mask`` suffix; ``masked=False`` skips masks entirely so the plain-named
     unmasked baseline stays available for A/B comparison."""
+    set_refmod_stage(ds.id, 'picking images')
+    try:
+        return _generate_for_dataset(ds, masked)
+    finally:
+        set_refmod_stage(ds.id, None)
+
+
+def _generate_for_dataset(ds, masked=True) -> dict:
     root = _comfy_root()
     python_exe = _python_exe(root)
     node_dir = _node_dir(root)
@@ -375,6 +407,7 @@ def generate_for_dataset(ds, masked=True) -> dict:
         raise ValueError('No kept images to encode.')
     storage = Path(dataset_path(ds.id))
     image_paths = [str(storage / row.filename) for row in picked]
+    set_refmod_stage(ds.id, 'generating face masks')
     masks = _face_masks_for(image_paths, ds.id) if masked else [None] * len(image_paths)
     masked_n = sum(1 for m in masks if m)
     suffix = '_mask' if masked else ''
@@ -393,6 +426,7 @@ def generate_for_dataset(ds, masked=True) -> dict:
     manifest['name'] = f"minimaxh3_{_safe_name(ds.name, ds.id)}_v1{suffix}_refmod"
     os.makedirs(manifest['output_dir'], exist_ok=True)
 
+    set_refmod_stage(ds.id, 'encoding (VAE load takes a minute)')
     proc = subprocess.run(  # noqa: S603 - fixed argv, no shell
         [str(python_exe), str(worker)],
         input=json.dumps(manifest).encode('utf-8'),

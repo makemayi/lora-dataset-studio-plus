@@ -2072,7 +2072,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
                   {/* Reference-bundle export for the H3 nodes: sits with the other
                       whole-dataset passes (caption, tools) — same kept-images input. */}
                   <H3RefModButton count={images.filter((i) => i.status === 'keep').length}
-                    busy={ds.busy} onClick={() => ds.generateRefMod()} />
+                    busy={ds.busy} stage={ds.refModStage} onClick={() => ds.generateRefMod()} />
                   <HelpBadge topic="action-h3-refmod" />
                 </div>
               </div>

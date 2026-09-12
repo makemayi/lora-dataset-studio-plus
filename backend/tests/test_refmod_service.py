@@ -404,3 +404,71 @@ def test_harvest_tiers_crops_into_face_recovery_values(app, tmp_path, monkeypatc
             f'one tpai pass per tier, got {seen}'
         assert len(rows) == 2 and all(r.derivation_kind == rs._CROP_KIND
                                       for r in rows), note
+
+
+# ── live stage progress (the button's poll-fed label) ─────────────────────────
+def test_generation_publishes_and_clears_stage(tmp_path, monkeypatch):
+    """generate_for_dataset publishes its stage while the worker runs (that is
+    what the button's poll reads) and ALWAYS clears it — success or failure."""
+    from app.services import refmod_service as svc
+
+    ds = _FakeRows(tmp_path)
+    seen = {}
+
+    def fake_run(argv, input=None, capture_output=True, timeout=None, env=None):
+        seen['during'] = svc.current_stage(ds.id)
+        return SimpleNamespace(returncode=0, stdout=json.dumps(
+            {'ok': True, 'tokens': 1, 'frames': 1, 'path': 'o', 'mb': 0}).encode(),
+            stderr=b'')
+
+    monkeypatch.setattr(svc.subprocess, 'run', fake_run)
+    monkeypatch.setattr(svc, '_kept_rows', lambda d: d.images)
+    monkeypatch.setattr(svc, '_harvest_face_crops',
+                        lambda ds_, sources, deficit, note: ([], note))
+    monkeypatch.setattr(svc.face_mask_service, 'generate_face_masks',
+                        lambda imgs, out_dir, expand=None, timeout=1800: {})
+    monkeypatch.setattr(svc, '_comfy_root', lambda: tmp_path)
+    monkeypatch.setattr(svc, '_python_exe', lambda root: tmp_path / 'py.exe')
+    monkeypatch.setattr(svc, '_node_dir', lambda root: tmp_path / 'pack')
+    monkeypatch.setattr(svc, '_vae_path', lambda root: tmp_path / 'h3.safetensors')
+
+    svc.generate_for_dataset(ds)
+    assert seen['during'], 'a stage must be live while the worker runs'
+    assert svc.current_stage(ds.id) is None, 'cleared on success'
+
+
+def test_generation_clears_stage_on_failure(tmp_path, monkeypatch):
+    from app.services import refmod_service as svc
+
+    ds = _FakeRows(tmp_path)
+
+    def fake_run(argv, input=None, capture_output=True, timeout=None, env=None):
+        return SimpleNamespace(returncode=1, stdout=b'',
+                               stderr='boom'.encode('utf-8'))
+
+    monkeypatch.setattr(svc.subprocess, 'run', fake_run)
+    monkeypatch.setattr(svc, '_kept_rows', lambda d: d.images)
+    monkeypatch.setattr(svc, '_harvest_face_crops',
+                        lambda ds_, sources, deficit, note: ([], note))
+    monkeypatch.setattr(svc.face_mask_service, 'generate_face_masks',
+                        lambda imgs, out_dir, expand=None, timeout=1800: {})
+    monkeypatch.setattr(svc, '_comfy_root', lambda: tmp_path)
+    monkeypatch.setattr(svc, '_python_exe', lambda root: tmp_path / 'py.exe')
+    monkeypatch.setattr(svc, '_node_dir', lambda root: tmp_path / 'pack')
+    monkeypatch.setattr(svc, '_vae_path', lambda root: tmp_path / 'h3.safetensors')
+
+    with pytest.raises(RuntimeError):
+        svc.generate_for_dataset(ds)
+    assert svc.current_stage(ds.id) is None, 'cleared on failure too'
+
+
+def test_refmod_progress_route_reports_stage(app, client):
+    from app.services import refmod_service as svc
+
+    svc.set_refmod_stage(7, 'encoding (VAE load takes a minute)')
+    try:
+        resp = client.get('/api/dataset/7/refmod/progress')
+        assert resp.get_json() == {'stage': 'encoding (VAE load takes a minute)'}
+    finally:
+        svc.set_refmod_stage(7, None)
+    assert client.get('/api/dataset/7/refmod/progress').get_json() == {'stage': None}

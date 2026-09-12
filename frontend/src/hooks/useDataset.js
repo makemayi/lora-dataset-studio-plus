@@ -765,16 +765,30 @@ export function useDataset() {
 
   // One-click MiniMax-H3 RefMod: encode the kept images into a reference bundle
   // for the ComfyUI-MiniMaxH3Mod pack. Synchronous server-side (the VAE load
-  // dominates, ~1-3 min) — the button owns the waiting state.
+  // dominates, ~1-3 min) — the button owns the waiting state, and while the
+  // request is in flight a 2 s poll of the stage endpoint feeds its live label
+  // (the generation is NOT a job row, so the Task Center shows nothing).
+  const [refModStage, setRefModStage] = useState(null);
   const generateRefMod = useCallback(() => wrap(async () => {
-    const d = await postJson(`/api/dataset/${currentId}/refmod`, {});
-    if (!d.ok) {
-      toast.error([d.error, d.detail].filter(Boolean).join(' — ') || 'Unexpected error');
-      return;
+    const poll = setInterval(async () => {
+      try {
+        const p = await apiFetch(`/api/dataset/${currentId}/refmod/progress`);
+        setRefModStage(p?.stage || null);
+      } catch { /* best-effort label; the request itself owns errors */ }
+    }, 2000);
+    try {
+      const d = await postJson(`/api/dataset/${currentId}/refmod`, {});
+      if (!d.ok) {
+        toast.error([d.error, d.detail].filter(Boolean).join(' — ') || 'Unexpected error');
+        return;
+      }
+      toast.success(`RefMod saved — ${d.tokens} tokens (${d.frames} frames). ` +
+        'Refresh the Load H3 RefMods node to pick it up.');
+      return d;
+    } finally {
+      clearInterval(poll);
+      setRefModStage(null);
     }
-    toast.success(`RefMod saved — ${d.tokens} tokens (${d.frames} frames). ` +
-      'Refresh the Load H3 RefMods node to pick it up.');
-    return d;
   }), [wrap, currentId, toast]);
 
   const caption = useCallback((mode) => wrap(async () => {
@@ -1973,7 +1987,7 @@ export function useDataset() {
           // pin these two runs verbatim, because a hook whose surface silently
           // loses an action is a button that silently stops working.
           resolveSmallImageRescue, improveImage, reimproveImage, improveBatch, classify,
-          caption, recaption, recaptionImages, generateRefMod,
+          caption, recaption, recaptionImages, generateRefMod, refModStage,
           setStatus, setCaption, mirrorImage, rotateImage, crop, cropRef, cropExtraRef, recropRefAuto,
           editReference, retryReferenceEdit, canRetryReferenceEdit, keepEditedReference,
           discardEditedReference, setDatasetTrainType, setDatasetFidelity, deleteImage,

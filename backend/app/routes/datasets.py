@@ -1445,6 +1445,14 @@ def dataset_refmod(dataset_id):
     return jsonify({'ok': True, **res})
 
 
+@bp.get('/dataset/<int:dataset_id>/refmod/progress')
+def dataset_refmod_progress(dataset_id):
+    """Current generation stage for the button's live label (None when idle).
+    The generation is a synchronous request, so the UI polls this while it
+    waits instead of reading a job row."""
+    return jsonify({'stage': refmod_service.current_stage(dataset_id)})
+
+
 @bp.post('/dataset/<int:dataset_id>/caption/cancel')
 def dataset_caption_cancel(dataset_id):
     """Ask an in-progress captioning batch to stop gracefully at the next image

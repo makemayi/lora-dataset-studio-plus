@@ -50,6 +50,14 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-09-12-refmod-stage-label',
+    date: '2026-09-12',
+    title: '⏳ RefMod generation now shows what it is doing',
+    blurb: 'The Generate H3 RefMod button no longer spins silently for a '
+      + 'minute-plus: its label follows the live stage — detecting faces, '
+      + 'cropping, Topaz upscaling, face masks, encoding.'
+  },
+  {
     id: '2026-09-12-topaz-smart-faces',
     date: '2026-09-12',
     title: '🧴 Topaz upscales keep real skin — no more plastic faces',
