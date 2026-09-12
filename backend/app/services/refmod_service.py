@@ -485,12 +485,19 @@ def _clean_hint_desc(desc):
     '观察：…' / '方案：…' around the real answer). Keep the LAST line that
     actually looks like the asked-for comma phrases, flatten all whitespace."""
     lines = [ln.strip() for ln in desc.splitlines() if ln.strip()]
+    best, best_seps = None, -1
     for ln in reversed(lines):
         if ((',' in ln or '，' in ln) and len(ln) <= 80
                 and not any(k in ln for k in _META_MARKS)
                 and not any(c in ln for c in _META_CHARS)):
-            return re.sub(r'\s+', '', ln).rstrip('。.,，')
-    return re.sub(r'\s+', '', desc)[:60].rstrip('。.,，')
+            # the ANSWER is the densest phrase list; meta lines carry 1-2
+            # separators at most ('需精炼成…，控制在40字内')
+            seps = ln.count('，') + ln.count(',')
+            if seps > best_seps:
+                best, best_seps = ln, seps
+    if best is None:
+        best = re.sub(r'\s+', '', desc)[:60]
+    return best.rstrip('。.,，')
 
 
 def _identity_hint(ds, image_paths, picked, note):
