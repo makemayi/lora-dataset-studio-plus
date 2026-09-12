@@ -492,3 +492,50 @@ def test_worker_gpu_busy_forever_fails_after_last_try(app, monkeypatch):
         row = TopazJob.query.filter_by(job_id=jid).one()
         assert row.status == 'failed'
         assert 'still busy after 3 tries' in (row.error_message or '')
+
+
+def test_worker_batch_groups_by_face_recovery(app, monkeypatch):
+    """Smart mode splits a batch into ONE tpai run per recovery tier: big-face
+    images run with recovery off, small-face ones with their tier strength —
+    and each image's result records the value its group ran with."""
+    import pathlib
+    from app.services.topaz_job_queue import topaz_queue
+    from app.models import TopazJob
+
+    linked = []
+    monkeypatch.setattr(topaz_queue, 'link_completed',
+                        lambda row: linked.append(row.job_id))
+    with app.app_context():
+        topaz_queue.enqueue_batch(
+            user_id='local', dataset_id=1,
+            inputs=[{'image_id': 10, 'input': 'C:/x/big.png'},
+                    {'image_id': 11, 'input': 'C:/x/small.png'}],
+            enhancements={'upscale': True, 'face_recovery': 'smart'})
+        monkeypatch.setattr('app.services.topaz_helper.resolve_face_recovery',
+                            lambda mode, paths: {'C:/x/big.png': False,
+                                                 'C:/x/small.png': 0.5})
+        seen = []
+
+        def fake_run_tpai(exe, input_dir, output_dir, **kw):
+            seen.append(kw.get('face_recovery'))
+            pathlib.Path(output_dir).mkdir(parents=True, exist_ok=True)
+            for p in pathlib.Path(input_dir).iterdir():
+                (pathlib.Path(output_dir) / p.name).write_bytes(b'out')
+            return 'ok', ''
+
+        monkeypatch.setattr('app.services.topaz_helper.run_tpai', fake_run_tpai)
+        monkeypatch.setattr('app.services.topaz_job_queue.stage_inputs',
+                            lambda inputs, tmp: {
+                                img_id: f'img_{img_id}.png'
+                                for img_id, _ in inputs})
+        monkeypatch.setattr('app.services.topaz_job_queue.collect_output',
+                            lambda tmp_dir, dataset_id, job_id, staged_name=None:
+                                f'DS/{staged_name}')
+
+        assert topaz_queue.process_one() is True
+        assert sorted(seen, key=str) == [0.5, False], 'one tpai run per tier'
+        row = TopazJob.query.order_by(TopazJob.id.desc()).first()
+        assert row.status == 'completed' and row.done_images == 2
+        results = json.loads(row.image_results or '{}')
+        assert results['10']['face_recovery'] is False
+        assert results['11']['face_recovery'] == 0.5

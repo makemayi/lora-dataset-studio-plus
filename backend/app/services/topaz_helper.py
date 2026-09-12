@@ -58,13 +58,21 @@ def preflight():
 
 
 def build_command(exe, input_path, output_dir, *, format=PNG, upscale=True,
-                  denoise=None, sharpen=None, lighting=None, color=None):
+                  denoise=None, sharpen=None, lighting=None, color=None,
+                  face_recovery=None):
     """The tpai.exe argv. The INPUT IS A POSITIONAL PATH (there is no -i flag
     — passing one makes tpai exit 127). By default ONLY the upscale toggle is
     sent and everything else is left to Topaz Autopilot, exactly like the
     desktop app: forcing denoise/sharpen on adds heavy passes Autopilot would
     skip, which is how a CLI run ends up slower than the app. The other toggles
-    are an OPTIONAL channel (None = Autopilot decides, True/False = force)."""
+    are an OPTIONAL channel (None = Autopilot decides, True/False = force).
+
+    ``face_recovery`` is the undocumented but verified ``--faceRecovery`` flag:
+    None = Autopilot decides (it enables it at strength 0.8 on EVERY detected
+    face — the plastic-skin recipe for dataset portraits), False = force off,
+    a float 0..1 = force on at that strength (param1). Both flag shapes were
+    verified against tpai.exe with --showSettings (enabled=false writes
+    through; param1= prints 'Overwriting Face Recovery param1')."""
     cmd = [exe, input_path, '-o', output_dir, '--format', format]
     if upscale is not None:
         cmd += ['--upscale', 'enabled=true' if upscale else 'enabled=false']
@@ -72,7 +80,95 @@ def build_command(exe, input_path, output_dir, *, format=PNG, upscale=True,
                       ('--lighting', lighting), ('--color', color)):
         if val is not None:
             cmd += [flag, f'enabled={"true" if val else "false"}']
+    if face_recovery is False:
+        cmd += ['--faceRecovery', 'enabled=false']
+    elif face_recovery:
+        cmd += ['--faceRecovery', 'enabled=true',
+                f'param1={float(face_recovery):g}']
     return cmd
+
+
+# -- smart face recovery -----------------------------------------------------
+# Measured on the operator's install (2026-09): Autopilot enables Face Recovery
+# at strength 0.8, hair+neck included, on EVERY face it finds. On dataset
+# portraits that are already sharp that is exactly the wax/plastic look the
+# community reports and Topaz's own docs warn about ("over-process faces that
+# are already high resolution ... creates a plastic feeling"). Topaz's docs
+# put the useful range at faces BELOW ~512px. The smart plan therefore scales
+# the strength DOWN as the face gets bigger, and turns it off entirely for
+# faces that need no reconstruction. Tier bounds are the largest face's SHORT
+# SIDE in pixels of the SOURCE image.
+#   >=512px off | 256-511px 0.30 | 128-255px 0.50 | <128px 0.70 | no face off
+# ponytail: size-only heuristic — no blur/sharpness term; add one only if
+# soft-but-large faces measurably need recovery too.
+FACE_RECOVERY_TIERS = ((512, False), (256, 0.30), (128, 0.50), (0, 0.70))
+
+
+def face_recovery_value(short_side_px):
+    """Largest-face short side in px -> False (off) or a strength 0..1."""
+    for limit, strength in FACE_RECOVERY_TIERS:
+        if short_side_px >= limit:
+            return strength
+    return False
+
+
+def _decodable(path):
+    """True when PIL can open the file at all. A cheap in-process header check
+    that keeps undecodable sources (corrupt files, fake bytes in tests) out of
+    the detection subprocess — they are decided OFF locally instead."""
+    try:
+        from PIL import Image
+        with Image.open(path):
+            return True
+    except Exception:                                            # noqa: BLE001
+        return False
+
+
+def plan_face_recovery(paths, timeout=900):
+    """{path: strength | False} for a whole batch — the smart per-image mode.
+
+    Runs the EXISTING face detector (face_mask.detect_faces, InsightFace in a
+    CPU subprocess — no GPU window) ONCE over the batch, then tiers every image
+    by its largest face. False is the safe answer everywhere: no face found,
+    undecodable source, detector unavailable or detection failed all mean OFF,
+    never a fallback to Autopilot's 0.8-on-everything — natural skin wins over
+    reconstructed skin, and a failed detection must never silently upgrade
+    itself into the wax default."""
+    paths = [p for p in (paths or []) if p]
+    plan = {p: False for p in paths}
+    decodable = [p for p in paths if _decodable(p)]
+    if not decodable:
+        return plan
+    from .face_mask import detect_faces, is_available
+    if not is_available():
+        logger.warning('topaz: smart face recovery off — face detection unavailable')
+        return plan
+    res = detect_faces(decodable, timeout=timeout)
+    if not (res or {}).get('ok'):
+        logger.warning('topaz: smart face recovery off — detection failed: %s',
+                       (res or {}).get('error'))
+        return plan
+    results = res.get('results') or {}
+    for p in decodable:
+        boxes = (results.get(p) or {}).get('boxes') or []
+        if not boxes:
+            continue
+        main = max(min(b[2] - b[0], b[3] - b[1]) for b in boxes)
+        plan[p] = face_recovery_value(main)
+    return plan
+
+
+def resolve_face_recovery(mode, paths):
+    """Stored enhancement mode -> what run_tpai should send per image.
+
+    True/None -> None (Autopilot decides, no detection, one flag shape for the
+    whole run); False -> forced off for all; 'smart' (the default everywhere)
+    or anything else -> a per-image plan dict."""
+    if mode is True or mode is None:
+        return None
+    if mode is False:
+        return False
+    return plan_face_recovery(paths)
 
 
 def _clean_env():

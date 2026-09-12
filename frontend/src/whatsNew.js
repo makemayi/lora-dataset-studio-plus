@@ -50,6 +50,15 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-09-12-topaz-smart-faces',
+    date: '2026-09-12',
+    title: '🧴 Topaz upscales keep real skin — no more plastic faces',
+    blurb: 'Topaz\'s Face Recovery was quietly smoothing every face at full '
+      + 'strength — the wax look. The app now measures each image\'s largest '
+      + 'face and only lets it work, gently, on faces smaller than ≈512px; '
+      + 'sharp portraits run with it off, and each result records the decision.'
+  },
+  {
     id: '2026-09-11-h3-refmod-button',
     date: '2026-09-11',
     title: '🧩 One-click H3 RefMod: turn a dataset into a reusable reference',

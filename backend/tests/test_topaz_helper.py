@@ -72,3 +72,68 @@ def test_run_tpai_license_message_is_actionable(monkeypatch):
     status, message = th.run_tpai('tpai.exe', 'in.png', 'out')
     assert status == 'license'
     assert 'open Topaz' in message
+
+
+def test_build_command_face_recovery_off_and_strength():
+    """The verified --faceRecovery channel: False -> enabled=false; a float
+    -> enabled=true + param1 (both shapes verified against tpai.exe)."""
+    cmd = th.build_command('tpai.exe', 'in.png', 'out', face_recovery=False)
+    assert cmd[cmd.index('--faceRecovery') + 1] == 'enabled=false'
+    cmd = th.build_command('tpai.exe', 'in.png', 'out', face_recovery=0.3)
+    i = cmd.index('--faceRecovery')
+    assert cmd[i + 1:i + 3] == ['enabled=true', 'param1=0.3']
+    # None (Autopilot) sends nothing at all.
+    assert '--faceRecovery' not in th.build_command('tpai.exe', 'in.png', 'out')
+
+
+def test_face_recovery_tiers_scale_down_as_faces_grow():
+    """Topaz's own docs: faces >=~512px get over-processed into plastic; only
+    smaller faces benefit, and smaller still -> a bit more strength."""
+    assert th.face_recovery_value(640) is False
+    assert th.face_recovery_value(512) is False
+    assert th.face_recovery_value(256) == 0.30
+    assert th.face_recovery_value(128) == 0.50
+    assert th.face_recovery_value(64) == 0.70
+
+
+def test_plan_tiers_by_largest_face(monkeypatch):
+    """Each image is tiered by its LARGEST face's short side; no-face images
+    are decided OFF, never handed to Autopilot's 0.8-everything default."""
+    from app.services import face_mask
+    paths = ['big.png', 'small.png', 'noface.png']
+    boxes = {'big.png': [[0, 0, 800, 600]],      # short side 600 -> off
+             'small.png': [[0, 0, 300, 200]],    # short side 200 -> 0.50
+             'noface.png': []}
+    monkeypatch.setattr(th, '_decodable', lambda p: True)
+    monkeypatch.setattr(face_mask, 'is_available', lambda: True)
+    monkeypatch.setattr(face_mask, 'detect_faces', lambda imgs, timeout=900:
+                        {'ok': True, 'results': {p: {'state': 'x', 'boxes': boxes[p]}
+                                                 for p in paths}})
+    assert th.plan_face_recovery(paths) == {'big.png': False, 'small.png': 0.50,
+                                            'noface.png': False}
+
+
+def test_plan_face_recovery_fails_off_when_detector_unavailable(monkeypatch):
+    """Detector missing or detection failed -> everything OFF. A broken
+    detector must never silently upgrade itself into the wax default."""
+    from app.services import face_mask
+    monkeypatch.setattr(th, '_decodable', lambda p: True)
+    monkeypatch.setattr(face_mask, 'is_available', lambda: False)
+    assert th.plan_face_recovery(['a.png']) == {'a.png': False}
+    monkeypatch.setattr(face_mask, 'is_available', lambda: True)
+    monkeypatch.setattr(face_mask, 'detect_faces', lambda imgs, timeout=900:
+                        {'ok': False, 'error': 'boom'})
+    assert th.plan_face_recovery(['a.png']) == {'a.png': False}
+
+
+def test_plan_skips_detector_for_undecodable_paths():
+    """Non-files / fake bytes are decided OFF in-process (no subprocess)."""
+    assert th.plan_face_recovery(['C:/nope/x.png']) == {'C:/nope/x.png': False}
+
+
+def test_resolve_face_recovery_modes():
+    assert th.resolve_face_recovery(True, ['p']) is None      # Autopilot
+    assert th.resolve_face_recovery(None, ['p']) is None      # Autopilot
+    assert th.resolve_face_recovery(False, ['p']) is False    # forced off
+    plan = th.resolve_face_recovery('smart', ['p'])           # default: smart
+    assert plan['p'] is False                                 # undecodable -> off

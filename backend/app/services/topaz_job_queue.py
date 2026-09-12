@@ -141,7 +141,9 @@ class TopazJobManager:
             job_id=job_id, user_id=str(user_id),
             dataset_id=int(dataset_id), image_id=int(image_id),
             status='queued', input_filename=input_filename,
-            enhancements=json.dumps(enhancements or {'upscale': True}))
+            enhancements=json.dumps(enhancements
+                                    or {'upscale': True,
+                                        'face_recovery': 'smart'}))
         db.session.add(row)
         if commit:
             db.session.commit()
@@ -166,7 +168,9 @@ class TopazJobManager:
             image_inputs=json.dumps({str(i['image_id']): i['input']
                                      for i in inputs}),
             total_images=len(ids),
-            enhancements=json.dumps(enhancements or {'upscale': True}))
+            enhancements=json.dumps(enhancements
+                                    or {'upscale': True,
+                                        'face_recovery': 'smart'}))
         db.session.add(row)
         if commit:
             db.session.commit()
@@ -292,9 +296,20 @@ class TopazJobManager:
                         status, message, results = self._run_batch(
                             exe, row, batch, toggles)
                     else:
+                        # Smart face recovery resolves BEFORE the single run:
+                        # one image -> one plan value (None=Autopilot, False=off,
+                        # float=strength). Everything else in toggles passes
+                        # through untouched.
+                        run_toggles = dict(toggles)
+                        plan = th.resolve_face_recovery(
+                            run_toggles.pop('face_recovery', 'smart'),
+                            [input_filename])
+                        value = (plan.get(input_filename, False)
+                                 if isinstance(plan, dict) else plan)
                         with tempfile.TemporaryDirectory(prefix='lds-topaz-') as tmp:
                             status, message = th.run_tpai(
-                                exe, input_filename, tmp, **toggles)
+                                exe, input_filename, tmp,
+                                face_recovery=value, **run_toggles)
                             if status == 'ok':
                                 output_path = collect_output(
                                     pathlib.Path(tmp), dataset_id, job_id)
@@ -305,6 +320,7 @@ class TopazJobManager:
                                        {'status': 'completed' if status == 'ok'
                                         else 'failed',
                                         'output_filename': output_path,
+                                        'face_recovery': value,
                                         'error': None if status == 'ok' else message}}
                 break
             except GpuBusyError as e:
@@ -376,7 +392,7 @@ class TopazJobManager:
         return [(str(i), inputs.get(str(i))) for i in ids
                 if inputs.get(str(i))]
 
-    def _poll_output_progress(self, out_dir, row_id, stop):
+    def _poll_output_progress(self, out_dir, row_id, stop, done_offset=0):
         """Stream the running batch's progress into ``done_images``.
 
         tpai is ONE process over the whole batch (so it loads its models once),
@@ -401,13 +417,50 @@ class TopazJobManager:
                 with app.app_context():
                     db.session.execute(
                         update(_TJ).where(_TJ.id == row_id)
-                        .values(done_images=n))
+                        .values(done_images=done_offset + n))
                     db.session.commit()
             time.sleep(POLL_SECONDS)
 
     def _run_batch(self, exe, row, batch, toggles):
-        """Stage all inputs into ONE folder, run tpai ONCE, map outputs back,
-        and link every finished tile. Returns (status, message, results)."""
+        """Split the batch into face-recovery groups, run each group as ONE tpai
+        call (models still load once per group — a homogeneous portrait set is
+        still a single run, exactly the pre-smart speed), map outputs back, and
+        link every finished tile. Returns (status, message, results)."""
+        from . import topaz_helper as th
+        run_toggles = dict(toggles)
+        plan = th.resolve_face_recovery(
+            run_toggles.pop('face_recovery', 'smart'),
+            [src for _, src in batch])
+        if isinstance(plan, dict):
+            grouped = {}
+            for image_id, src in batch:
+                grouped.setdefault(plan.get(src, False), []).append((image_id, src))
+            # Off-images run FIRST (the usual biggest group), then mildest to
+            # strongest so an early failure biases toward untouched skin.
+            ordered = sorted(grouped.items(),
+                             key=lambda kv: (kv[0] is not False, kv[0] or 0))
+        else:
+            # Autopilot (None) or forced-off (False): one run for the whole
+            # batch, exactly like every pre-smart job.
+            ordered = [(plan, list(batch))]
+        results, status, message = {}, 'ok', None
+        done_before = 0
+        for value, group in ordered:
+            g_status, g_message, g_results = self._run_tpai_group(
+                exe, row, group, run_toggles, value, done_before)
+            for image_id, res in g_results.items():
+                results[image_id] = res
+                if res.get('status') == 'completed':
+                    done_before += 1
+            if g_status != 'ok' and status == 'ok':
+                status, message = g_status, g_message
+        return status, message, results
+
+    def _run_tpai_group(self, exe, row, batch, toggles, face_recovery_value,
+                        done_offset=0):
+        """Stage all inputs into ONE folder, run tpai ONCE with this group's
+        face-recovery value, map outputs back, and link every finished tile.
+        Returns (status, message, results)."""
         from . import topaz_helper as th
         from .dataset_generation_service import link_topaz_image
         results = {}
@@ -422,13 +475,14 @@ class TopazJobManager:
                 stop = threading.Event()
                 poller = threading.Thread(
                     target=self._poll_output_progress,
-                    args=(str(pathlib.Path(tmp_out)), row.id, stop),
+                    args=(str(pathlib.Path(tmp_out)), row.id, stop, done_offset),
                     daemon=True)
                 poller.start()
                 try:
                     status, message = th.run_tpai(
                         exe, str(pathlib.Path(tmp_in)), str(pathlib.Path(tmp_out)),
-                        # ONE tpai process for the WHOLE batch: the default 600 s
+                        face_recovery=face_recovery_value,
+                        # ONE tpai process for the WHOLE group: the default 600 s
                         # timeout is a single-image figure, and a batch of ~87
                         # images would be killed inside it (measured: a 600 s cut
                         # stopped a batch at ~31 of 87, and the job came back
@@ -445,6 +499,7 @@ class TopazJobManager:
                     for image_id, _ in batch:
                         results[str(image_id)] = {
                             'status': 'failed', 'output_filename': None,
+                            'face_recovery': face_recovery_value,
                             'error': message or 'Topaz batch failed'}
                     return status, message, results
                 for image_id, _ in batch:
@@ -452,6 +507,7 @@ class TopazJobManager:
                     if not staged_name:
                         results[str(image_id)] = {
                             'status': 'failed', 'output_filename': None,
+                            'face_recovery': face_recovery_value,
                             'error': 'source could not be staged'}
                         continue
                     out_path = collect_output(
@@ -460,10 +516,12 @@ class TopazJobManager:
                     if out_path is None:
                         results[str(image_id)] = {
                             'status': 'failed', 'output_filename': None,
+                            'face_recovery': face_recovery_value,
                             'error': 'Topaz wrote nothing for this image'}
                         continue
                     results[str(image_id)] = {
                         'status': 'completed', 'output_filename': out_path,
+                        'face_recovery': face_recovery_value,
                         'error': None}
                     try:
                         link_topaz_image(row.dataset_id, int(image_id),
@@ -473,7 +531,7 @@ class TopazJobManager:
                             'status': 'failed', 'output_filename': None,
                             'error': f'could not attach the result: {e}'}
                     with self._lock:
-                        row.done_images = sum(
+                        row.done_images = done_offset + sum(
                             1 for r in results.values()
                             if r.get('status') == 'completed')
                         db.session.commit()

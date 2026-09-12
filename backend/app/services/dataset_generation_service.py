@@ -1718,7 +1718,7 @@ def topaz_upscale_replace(user_id, image_id):
         jid = topaz_queue.enqueue(
             user_id=str(user_id), dataset_id=img.dataset_id,
             image_id=img.id, input_filename=source_path,
-            enhancements={'upscale': True})
+            enhancements={'upscale': True, 'face_recovery': 'smart'})
         _clear_watermark_metadata(img)
         img.filename = None
         img.status = 'pending'
