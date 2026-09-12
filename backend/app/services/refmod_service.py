@@ -432,13 +432,14 @@ def _fill_from_pending(ds, by, note):
 _HINT_PROMPT = (
     '只根据这张人脸照片，用中文客观描述这个人的稳定身份特征，供绘画提示词使用：'
     '脸部特征（脸型、眼、鼻、唇）、发型与发色、肤色、明显的脸部特征点（如痣、雀斑、疤痕）。'
-    '不要描述表情、情绪、背景、服装和摄影风格；不要评价美丑；用逗号分隔的短语，40字以内。')
+    '不要描述表情、情绪、背景、服装和摄影风格；不要评价美丑；用逗号分隔的短语，40字以内。'
+    '/no_think')
 
 
 _LLAMA_BASE = 'http://127.0.0.1:8080'   # the local llama.cpp llama-server
 
 
-def _llama_describe(image_path, prompt, timeout=180):
+def _llama_describe(image_path, prompt, timeout=300):
     """Describe an image through the local llama-server (OpenAI-compatible;
     vision via a base64 image_url part — NOT Ollama, per the user's stack).
     Model auto-picked from /v1/models (the multi-model server rejects an
@@ -455,7 +456,7 @@ def _llama_describe(image_path, prompt, timeout=180):
         if not model:
             return ''
         body = json.dumps({
-            'model': model, 'max_tokens': 500, 'temperature': 0.3,
+            'model': model, 'max_tokens': 300, 'temperature': 0.3,
             'stream': False,
             'messages': [{'role': 'user', 'content': [
                 {'type': 'text', 'text': prompt},
