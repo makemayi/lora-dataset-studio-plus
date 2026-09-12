@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import urllib.request
@@ -474,6 +475,24 @@ def _llama_describe(image_path, prompt, timeout=300):
         return ''
 
 
+_META_MARKS = ('格式', '统计', '观察', '方案', '提示词', '不超过', '流程',
+               '草稿', '字数')
+_META_CHARS = (':', '：', '(', '（')   # colons/parens = scratchpad, not answer
+
+
+def _clean_hint_desc(desc):
+    """Thinking models dump their scratchpad INTO content (meta lines like
+    '观察：…' / '方案：…' around the real answer). Keep the LAST line that
+    actually looks like the asked-for comma phrases, flatten all whitespace."""
+    lines = [ln.strip() for ln in desc.splitlines() if ln.strip()]
+    for ln in reversed(lines):
+        if ((',' in ln or '，' in ln) and len(ln) <= 80
+                and not any(k in ln for k in _META_MARKS)
+                and not any(c in ln for c in _META_CHARS)):
+            return re.sub(r'\s+', '', ln).rstrip('。.,，')
+    return re.sub(r'\s+', '', desc)[:60].rstrip('。.,，')
+
+
 def _identity_hint(ds, image_paths, picked, note):
     """Build the prompt_hint: a one-line identity description (facial features,
     hairstyle, skin tone, marks like moles) prefixed with the subject tag, e.g.
@@ -495,7 +514,7 @@ def _identity_hint(ds, image_paths, picked, note):
     if not desc:
         note += '; identity hint unavailable (vision model silent) — prefix only'
         return prefix, note
-    return f'{prefix}，{desc.strip().rstrip("。")}。', note
+    return f'{prefix}，{_clean_hint_desc(desc)}。', note
 
 
 def generate_for_dataset(ds, masked=False) -> dict:
