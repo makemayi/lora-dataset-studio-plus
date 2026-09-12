@@ -1433,13 +1433,14 @@ def dataset_refmod(dataset_id):
         return jsonify({'error': 'not found'}), 404
     data = request.get_json(silent=True) or {}
     try:
-        # mask=False 生成无遮罩基线（原命名）；默认带遮罩（名称加 _mask）。
-        # Kept-image validation lives in the service (it owns the store query);
-        # an empty pick raises ValueError -> 400 here.
+        # mask=False 生成无遮罩基线（原命名）。默认无蒙版（用户实测 2026-09-12：
+        # 蒙版反而抑制了有用的身份信息）；想要蒙版抑制传 {"mask": true}，
+        # 文件名加 _mask 后缀。Kept-image validation lives in the service
+        # (it owns the store query); an empty pick raises ValueError -> 400 here.
         vision_keepalive.revoke('refmod extraction')   # same gate as training
         with gpu_exclusive_vision_window(flag_ttl=600):
             res = refmod_service.generate_for_dataset(
-                ds, masked=bool(data.get('mask', True)))
+                ds, masked=bool(data.get('mask', False)))
     except Exception as e:
         return _map_error(e)
     return jsonify({'ok': True, **res})

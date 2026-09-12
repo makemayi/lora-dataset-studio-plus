@@ -37,3 +37,22 @@ test('busy: the labels flip and the button disables', () => {
 test('a dataset with no kept images renders nothing at all', () => {
   assert.equal(btn({ onClick: () => {}, count: 0 }), '')
 })
+
+test('busy with a stage: the stage label shows, the generic one stays mounted but hidden', () => {
+  const html = btn({ onClick: () => {}, count: 12, busy: true,
+                     stage: 'upscaling crops (Topaz, 3 left)' })
+  const generic = html.match(/<span [^>]*data-label="busy-generic"[^>]*>/)[0]
+  const stage = html.match(/<span [^>]*data-label="busy-stage"[^>]*>/)[0]
+  assert.ok(generic.includes('hidden'), 'generic label hides while a stage is live')
+  assert.ok(!stage.includes('hidden'), 'stage label must be visible while busy')
+  assert.match(html, /upscaling crops \(Topaz, 3 left\)/)
+  assert.match(html, /Encoding RefMod…/, 'generic label stays mounted')
+})
+
+test('busy before the first poll lands: generic label shows, stage span mounted', () => {
+  const html = btn({ onClick: () => {}, count: 12, busy: true })
+  const generic = html.match(/<span [^>]*data-label="busy-generic"[^>]*>/)[0]
+  const stage = html.match(/<span [^>]*data-label="busy-stage"[^>]*>/)[0]
+  assert.ok(!generic.includes('hidden'))
+  assert.ok(stage.includes('hidden'), 'stage span stays mounted even with no stage yet')
+})

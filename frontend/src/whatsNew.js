@@ -50,6 +50,15 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-09-12-refmod-unmasked-default',
+    date: '2026-09-12',
+    title: '🧩 RefMod default: no face mask (it measured worse)',
+    blurb: 'Side-by-side tests showed the face-mask suppression cost '
+      + 'identity information instead of adding it. Generating a RefMod '
+      + 'now defaults to the clean, unmasked encode — pass mask=true if '
+      + 'you ever want the _mask variant back.'
+  },
+  {
     id: '2026-09-12-topaz-size-cap',
     date: '2026-09-12',
     title: '📐 Topaz outputs capped at a sane size',

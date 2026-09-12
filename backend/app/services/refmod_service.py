@@ -366,13 +366,14 @@ def current_stage(ds_id):
     return _STAGES.get(int(ds_id))
 
 
-def generate_for_dataset(ds, masked=True) -> dict:
+def generate_for_dataset(ds, masked=False) -> dict:
     """Encode ds's kept images into one RefMod. Synchronous (~1-3 min: the VAE
     load dominates); the caller holds the GPU vision window.
 
-    ``masked=True`` applies face-mask suppression and names the output with a
-    ``_mask`` suffix; ``masked=False`` skips masks entirely so the plain-named
-    unmasked baseline stays available for A/B comparison."""
+    ``masked=False`` is the default (user-measured 2026-09-12: the face-mask
+    suppression costs identity information instead of adding it); the plain
+    name carries no suffix. ``masked=True`` applies face-mask suppression and
+    names the output with a ``_mask`` suffix, kept for A/B comparison."""
     set_refmod_stage(ds.id, 'picking images')
     try:
         return _generate_for_dataset(ds, masked)
@@ -380,7 +381,7 @@ def generate_for_dataset(ds, masked=True) -> dict:
         set_refmod_stage(ds.id, None)
 
 
-def _generate_for_dataset(ds, masked=True) -> dict:
+def _generate_for_dataset(ds, masked=False) -> dict:
     root = _comfy_root()
     python_exe = _python_exe(root)
     node_dir = _node_dir(root)

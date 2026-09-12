@@ -155,7 +155,8 @@ def test_generate_for_dataset_parses_worker_json(tmp_path, monkeypatch):
 
     res = svc.generate_for_dataset(ds)
     assert res['tokens'] == 8192 and res['frames'] == 8
-    assert seen['manifest']['name'] == 'minimaxh3_test_person_v1_mask_refmod'
+    assert seen['manifest']['name'] == 'minimaxh3_test_person_v1_refmod', 'default is UNMASKED (user-measured 2026-09-12)'
+    assert all(m is None for m in seen['manifest']['masks'])
     assert len(seen['manifest']['images']) == 3
     assert all(str(ds.storage) in p for p in seen['manifest']['images'])
 
@@ -208,7 +209,7 @@ def test_unsafe_dataset_name_sanitizes(tmp_path, monkeypatch):
     monkeypatch.setattr(svc, '_node_dir', lambda root: tmp_path / 'custom_nodes' / 'pack')
     monkeypatch.setattr(svc, '_vae_path', lambda root: tmp_path / 'models' / 'vae' / 'h3.safetensors')
 
-    svc.generate_for_dataset(ds)
+    svc.generate_for_dataset(ds, masked=True)
     # CJK chars are isalnum() in Python — they survive; punctuation becomes '_'
     # and a trailing '_' is stripped by .strip('_').
     assert seen['manifest']['name'] == 'minimaxh3_人世间_宋佳_v1_mask_refmod'

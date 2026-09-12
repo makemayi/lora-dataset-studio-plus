@@ -777,7 +777,9 @@ export function useDataset() {
       } catch { /* best-effort label; the request itself owns errors */ }
     }, 2000);
     try {
-      const d = await postJson(`/api/dataset/${currentId}/refmod`, {});
+      // mask: false pinned explicitly — the app always generates the clean,
+      // unmasked encode (user-measured 2026-09-12: the mask costs identity).
+      const d = await postJson(`/api/dataset/${currentId}/refmod`, { mask: false });
       if (!d.ok) {
         toast.error([d.error, d.detail].filter(Boolean).join(' — ') || 'Unexpected error');
         return;
