@@ -540,13 +540,22 @@ class TopazJobManager:
             return 'unknown', f'{type(e).__name__}: {e}', results
 
     def _restore_unfinished(self, row, results):
-        """Cancelled: restore every image that did not finish. Successful ones
-        stay — their tiles are already linked and the swap is settled."""
+        """Cancelled/failed: restore every image that did not finish. Successful
+        ones stay — their tiles are already linked and the swap is settled.
+        Single-image rows carry no image_ids list — their id lives in the
+        legacy column, so read it as a one-element batch (a failed single
+        upscale used to leave its tile stuck pending forever)."""
         from .dataset_generation_service import restore_swapped_original
         from ..models import FaceDatasetImage
+        if row.image_ids:
+            ids = json.loads(row.image_ids or '[]')
+        elif row.image_id:
+            ids = [row.image_id]
+        else:
+            ids = []
         finished = {int(i) for i, r in (results or {}).items()
                     if r.get('status') == 'completed'}
-        for img_id in (json.loads(row.image_ids or '[]') if row.image_ids else []):
+        for img_id in ids:
             if int(img_id) in finished:
                 continue
             img = db.session.get(FaceDatasetImage, int(img_id))

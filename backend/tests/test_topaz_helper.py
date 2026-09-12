@@ -76,12 +76,14 @@ def test_run_tpai_license_message_is_actionable(monkeypatch):
 
 def test_build_command_face_recovery_off_and_strength():
     """The verified --faceRecovery channel: False -> enabled=false; a float
-    -> enabled=true + param1 (both shapes verified against tpai.exe)."""
+    -> enabled=true + strength (both verified on REAL runs — param1= also
+    writes through --showSettings but breaks the engine: 'Error running
+    model', exit 0, no output)."""
     cmd = th.build_command('tpai.exe', 'in.png', 'out', face_recovery=False)
     assert cmd[cmd.index('--faceRecovery') + 1] == 'enabled=false'
     cmd = th.build_command('tpai.exe', 'in.png', 'out', face_recovery=0.3)
     i = cmd.index('--faceRecovery')
-    assert cmd[i + 1:i + 3] == ['enabled=true', 'param1=0.3']
+    assert cmd[i + 1:i + 3] == ['enabled=true', 'strength=0.3']
     # None (Autopilot) sends nothing at all.
     assert '--faceRecovery' not in th.build_command('tpai.exe', 'in.png', 'out')
 

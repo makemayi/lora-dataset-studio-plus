@@ -539,3 +539,46 @@ def test_worker_batch_groups_by_face_recovery(app, monkeypatch):
         results = json.loads(row.image_results or '{}')
         assert results['10']['face_recovery'] is False
         assert results['11']['face_recovery'] == 0.5
+
+
+def test_single_job_failure_restores_pending_image(app, monkeypatch):
+    """A FAILED single-image job must restore its swapped tile: the legacy
+    column (no image_ids list) is read as a one-element batch — before this,
+    a failed single upscale left the tile pending forever (measured live:
+    dataset 4 image 1045, 2026-09-12)."""
+    import pathlib
+    from app.services.topaz_job_queue import topaz_queue
+    from app.models import TopazJob, FaceDataset, FaceDatasetImage
+    from app.extensions import db
+
+    with app.app_context():
+        ds = FaceDataset(name='single ds', trigger_word='t')
+        db.session.add(ds)
+        db.session.commit()
+        img = FaceDatasetImage(dataset_id=ds.id, status='pending',
+                               job_id='PENDING', filename=None)
+        db.session.add(img)
+        db.session.commit()
+
+        jid = topaz_queue.enqueue(
+            user_id='local', dataset_id=ds.id, image_id=img.id,
+            input_filename='C:/x/a.png',
+            enhancements={'upscale': True, 'face_recovery': 'smart'})
+        img.job_id = jid            # the swap flow stamps the tile with the job
+        db.session.commit()
+
+        def fake_run_tpai(exe, input_path, output_dir, **kw):
+            pathlib.Path(output_dir).mkdir(parents=True, exist_ok=True)
+            return 'ok', ''           # tpai 'succeeds' but writes nothing
+
+        monkeypatch.setattr('app.services.topaz_helper.run_tpai', fake_run_tpai)
+        monkeypatch.setattr(topaz_queue, 'link_completed', lambda row: None)
+        calls = []
+        monkeypatch.setattr(
+            'app.services.dataset_generation_service.restore_swapped_original',
+            lambda img_, reason=None: calls.append(img_.id))
+
+        topaz_queue.process_one()
+        row = TopazJob.query.filter_by(job_id=jid).one()
+        assert row.status == 'failed'
+        assert calls == [img.id], 'the pending single tile must be restored'

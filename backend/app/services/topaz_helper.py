@@ -70,9 +70,12 @@ def build_command(exe, input_path, output_dir, *, format=PNG, upscale=True,
     ``face_recovery`` is the undocumented but verified ``--faceRecovery`` flag:
     None = Autopilot decides (it enables it at strength 0.8 on EVERY detected
     face — the plastic-skin recipe for dataset portraits), False = force off,
-    a float 0..1 = force on at that strength (param1). Both flag shapes were
-    verified against tpai.exe with --showSettings (enabled=false writes
-    through; param1= prints 'Overwriting Face Recovery param1')."""
+    a float 0..1 = force on at that strength. Both shapes were verified against
+    tpai.exe on REAL runs, not just --skipProcessing: strength uses the
+    documented override key ``strength=`` — the also-accepted ``param1=``
+    silently breaks the engine there ("Error running model" with exit code 0
+    and NO output file), which is exactly how a run ends up 'ok' with nothing
+    written."""
     cmd = [exe, input_path, '-o', output_dir, '--format', format]
     if upscale is not None:
         cmd += ['--upscale', 'enabled=true' if upscale else 'enabled=false']
@@ -84,7 +87,7 @@ def build_command(exe, input_path, output_dir, *, format=PNG, upscale=True,
         cmd += ['--faceRecovery', 'enabled=false']
     elif face_recovery:
         cmd += ['--faceRecovery', 'enabled=true',
-                f'param1={float(face_recovery):g}']
+                f'strength={float(face_recovery):g}']
     return cmd
 
 
