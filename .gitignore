@@ -98,6 +98,9 @@ docs/superpowers/
 # Per-machine debugging monitors: they hard-code a PID and a local log path, so
 # they are worthless on any other machine and stale on this one an hour later.
 /monitor_*.ps1
+# Same family, Python edition: underscore-prefixed backend ops helpers
+# (live job monitors, one-shot DB repairs with hard-coded ids).
+/backend/_*.py
 
 # Local-only helpers that drive a THIRD-PARTY site from the operator's own
 # logged-in browser (e.g. the Douyin account walker). They are pinned to one
