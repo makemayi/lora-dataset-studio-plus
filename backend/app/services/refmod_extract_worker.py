@@ -130,7 +130,12 @@ def main() -> None:
         background_retention = float(manifest.get('background_retention') or 0.0)
         first = load_image_file(images[0], max_edge=resolution * 2)
         h, w = first.shape[1], first.shape[2]
-        scale = min(1.0, resolution / min(h, w))
+        # 1024px LONG side (2026-09-12, user call): short-side-1024 blew portrait
+        # refs up to ~1376 tokens/frame, which pushed the 20-picture pick over
+        # the token budget so fit_token_budget dropped 4 of them; a long-side
+        # cap keeps every pick under budget AND cuts the ref tokens the DiT
+        # attends (the generation-time speed cost the user was feeling).
+        scale = min(1.0, resolution / max(h, w))
         canvas = (max(32, round(w * scale / 32) * 32),
                   max(32, round(h * scale / 32) * 32))
 

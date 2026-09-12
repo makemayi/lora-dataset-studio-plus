@@ -27,7 +27,7 @@ from ..services.dataset_storage import dataset_path
 # half/full frames are what carry CLOTHING into the latent (the #1 complaint).
 # Ladder face → half → full tops up only when a dataset lacks close-ups.
 _MAX_FACE, _MAX_HALF, _MAX_FULL = 12, 4, 4
-_TOKEN_BUDGET = 20480   # keeps every picked angle un-resampled (20×1024)
+_TOKEN_BUDGET = 20480   # 20 frames x <=1024 tokens at a 1024px-long-side encode
 _BACKGROUND_RETENTION = 0.0   # outside the face mask collapses to a blurred copy
 _MASKS_DIR_NAME = 'refmod'
 _SUBPROCESS_TIMEOUT_S = 1800
