@@ -86,6 +86,10 @@ def collect_output(tmp_dir, dataset_id, job_id, staged_name=None):
     dst_name = f'topaz_{job_id[-8:]}_{src.name}'
     dst = os.path.join(out_dir, dst_name)
     shutil.copy2(str(src), dst)
+    # Cap the output side HERE — the single choke point for both batch and
+    # single runs — so no Autopilot 4x runaway lands in the dataset.
+    from . import topaz_helper as th
+    th.cap_output_side(dst)
     return dst_name
 
 

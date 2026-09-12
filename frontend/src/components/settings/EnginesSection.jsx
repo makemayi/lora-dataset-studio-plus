@@ -1894,6 +1894,26 @@ function TopazCard({ config, setField, configDefaults }) {
               ? `Found: ${probe.path}`
               : 'Not found — install Topaz or set the path above.'}
         </span>
+
+        <div className="mt-3">
+          <label htmlFor="topaz-max-side" className="block text-xs font-medium text-content">
+            Max output side (px)
+          </label>
+          <input
+            id="topaz-max-side"
+            type="number"
+            min="0"
+            step="256"
+            value={tz.max_output_side ?? dflt('max_output_side')}
+            onChange={(e) => setField('topaz', 'max_output_side', e.target.value)}
+            className={INPUT_CLASS}
+          />
+          <HelpText className="mt-1 text-xs text-content-muted">
+            Topaz's Autopilot picks its own scale factor and can go 4x+ on
+            small sources. Anything longer than this side is downscaled after
+            the run — training crops to 1024 anyway. 0 = no cap.
+          </HelpText>
+        </div>
       </div>
     </Card>
   )

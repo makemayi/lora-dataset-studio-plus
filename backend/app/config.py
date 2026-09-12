@@ -558,6 +558,13 @@ DEFAULTS = {
     #   it leaves the GPU free for captioning and training.
     'shot_detect': {'python': '', 'threshold': 0.5, 'min_shot_frames': 5,
                     'device': 'auto'},
+    # 🧩 Topaz Photo AI (tpai.exe) upscale engine. exe_path blank = probe the
+    # standard install paths. max_output_side caps EVERY Topaz output's longest
+    # side (Lanczos downscale after the run): Autopilot picks its own factor
+    # and measurably goes 4x+ on small sources, which turns a 768x1024 dataset
+    # tile into a 65.9 MB 6000x8000 PNG that training crops back to 1024
+    # anyway. 0 disables the cap. Verified live 2026-09-12.
+    'topaz': {'exe_path': '', 'max_output_side': 2048},
     # 🎬 Video bank quality cuts (wave 2). ALL None by default — a cut that has
     # not been chosen filters NOTHING. That is a decision, not an omission: the
     # published thresholds measurably do not transfer between corpora (the public

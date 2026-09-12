@@ -846,6 +846,8 @@ const TOPICS = [
     ['upscale engine', 'upscale', 'upscaler', 'topaz', 'seedvr2', 'which upscaler', '🔍']),
   setting('topaz.exe_path', 'engines', 'topaz-exe', 'Topaz executable (tpai.exe)',
     ['topaz', 'tpai', 'topaz photo ai', 'exe path', 'executable', 'not found', 'probe']),
+  setting('topaz.max_output_side', 'engines', 'topaz-max-side', 'Topaz max output side (px)',
+    ['topaz', 'upscale size', 'too big', 'huge file', 'resolution', 'file size', '4x', 'output side']),
   // and from the two failures that look like bugs: a search that returns nothing
   // because the pass never ran, and a "without" that returns exactly what was
   // excluded — which is CLIP ignoring the word, not the app ignoring the user.

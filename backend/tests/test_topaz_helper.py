@@ -139,3 +139,27 @@ def test_resolve_face_recovery_modes():
     assert th.resolve_face_recovery(False, ['p']) is False    # forced off
     plan = th.resolve_face_recovery('smart', ['p'])           # default: smart
     assert plan['p'] is False                                 # undecodable -> off
+
+
+def test_cap_output_side_downscales_only_oversized(tmp_path, monkeypatch):
+    """The post-run cap: an oversized output is Lanczos-fit to the longest
+    side; a small one passes untouched; 0/blank disables the cap."""
+    from PIL import Image
+    big = tmp_path / 'big.png'
+    Image.new('RGB', (800, 400)).save(big)
+    size = th.cap_output_side(str(big), cap=200)
+    assert size == (200, 100)
+    with Image.open(big) as im:
+        assert im.size == (200, 100)
+
+    small = tmp_path / 'small.png'
+    Image.new('RGB', (150, 100)).save(small)
+    assert th.cap_output_side(str(small), cap=200) is None
+
+    Image.new('RGB', (800, 400)).save(big)
+    monkeypatch.setattr(th.cfg, 'get', lambda key, *a: 0 if key == 'topaz.max_output_side' else None)
+    assert th.cap_output_side(str(big)) is None, 'cap 0 = uncapped'
+
+    Image.new('RGB', (800, 400)).save(big)
+    monkeypatch.setattr(th.cfg, 'get', lambda key, *a: 2048 if key == 'topaz.max_output_side' else None)
+    assert th.cap_output_side(str(big)) is None, 'under the cap = untouched'

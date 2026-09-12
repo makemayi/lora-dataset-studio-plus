@@ -188,6 +188,45 @@ def _clean_env():
     return env
 
 
+def cap_output_side(path, cap=None):
+    """Downscale an image whose longest side exceeds ``cap`` (Lanczos, ratio
+    preserved, in place). Returns the new (w, h) when a resize happened, else
+    None. ``cap`` None reads the ``topaz.max_output_side`` config; 0 disables.
+
+    WHY THIS EXISTS: tpai's CLI cannot pin the upscale factor — the numeric
+    overrides are broken at the engine level (``param1=``/``scale=`` are
+    accepted with an 'Overwriting...' line, then the model dies with
+    'type must be number, but is string' / 'Error running model' while the
+    process exits 0; measured 2026-09-12 on 4.0.1, and the same failure is an
+    unresolved Topaz community report on 3.3.1). Autopilot therefore picks its
+    own factor — measurably 4x+ on small sources — and the only reliable cap
+    is ours, applied after the run."""
+    if cap is None:
+        try:
+            cap = int(cfg.get('topaz.max_output_side') or 0)
+        except (TypeError, ValueError):
+            cap = 0
+    if cap <= 0 or not os.path.isfile(path):
+        return None
+    from PIL import Image
+    try:
+        with Image.open(path) as im:
+            w, h = im.size
+            if max(w, h) <= cap:
+                return None
+            ratio = cap / max(w, h)
+            size = (max(1, round(w * ratio)), max(1, round(h * ratio)))
+            resized = im.resize(size, Image.LANCZOS)
+            resized.save(path)
+        logger.info('topaz: output %dx%d exceeded the %dpx cap -> %dx%d',
+                    w, h, cap, size[0], size[1])
+        return size
+    except Exception:                                            # noqa: BLE001
+        # A failed cap must never lose the Topaz output itself.
+        logger.exception('topaz: could not cap output side for %s', path)
+        return None
+
+
 def run_tpai(exe, input_path, output_dir, *, timeout=DEFAULT_TIMEOUT_S, **toggles):
     """Run one image through Topaz. Returns (status, message) where status is
     one of 'ok' | 'partial' | 'no_valid_files' | 'license' | 'bad_args' |

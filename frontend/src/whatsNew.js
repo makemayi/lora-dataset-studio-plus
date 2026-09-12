@@ -50,6 +50,15 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-09-12-topaz-size-cap',
+    date: '2026-09-12',
+    title: '📐 Topaz outputs capped at a sane size',
+    blurb: 'Topaz\'s Autopilot could scale a small tile 4x+ into a 65 MB '
+      + 'PNG that training crops back down anyway. Outputs are now '
+      + 'downscaled so the longest side stays at 2048px by default — '
+      + 'tune it (or turn the cap off) in Settings ▸ Image engines.'
+  },
+  {
     id: '2026-09-12-refmod-stage-label',
     date: '2026-09-12',
     title: '⏳ RefMod generation now shows what it is doing',
