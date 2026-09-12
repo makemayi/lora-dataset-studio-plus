@@ -87,16 +87,34 @@ def _vae_path(root: Path) -> Path:
     return sorted(candidates, key=lambda f: ('video' not in f.name.lower(), f.name))[0]
 
 
+_BAD_FACE_STATES = ('no_face', 'too_small', 'unreadable', 'error')
+_WEAK_FACE_STATES = ('low_det', 'extreme_pose')
+
+
+def _face_order(rows, limit):
+    """正脸优先，侧脸为辅，避开遮挡: usable faces only (no_face/too_small/
+    unreadable/error are not face references), ordered frontal-first (|yaw|),
+    profiles and unmeasured rows after, and low_det (occluded/unclear) or
+    extreme_pose demoted to the tail — still eligible when a dataset has
+    nothing better."""
+    usable = [r for r in rows
+              if (r.face_state or 'scorable') not in _BAD_FACE_STATES]
+    return sorted(usable, key=lambda r: (
+        (r.face_state or '') in _WEAK_FACE_STATES,
+        abs(r.face_yaw) if r.face_yaw is not None else 90.0,
+        -(r.face_score or 0), r.id))[:limit]
+
+
 def pick_images(images) -> list:
-    """Identity-first pick, ≤20 rows: up to 12 face close-ups (yaw-spread),
-    4 half shots and 4 full frames — the figure and clothing ride to the mod
-    too, so fulls are ALWAYS taken when the dataset has them (they are not a
-    thin-set fallback any more; a thin set is whatever it is — every kept row
-    is already in). House framing mapping (Bank build's): face→face,
-    bust→half, body→full; a back view is not an identity reference and is
-    never picked. Inside a bucket, scored rows lead (face_score DESC) and the
-    face bucket is spread across head angles instead of following import
-    order."""
+    """Identity-first pick, ≤20 rows: up to 12 face close-ups — 正脸优先，
+    侧脸为辅，避开遮挡 (frontal |yaw| first, profiles after, low_det/
+    extreme_pose demoted, dead face states excluded) — then 4 half shots and
+    4 full frames: the figure and clothing ride to the mod too, so fulls are
+    ALWAYS taken when the dataset has them (they are not a thin-set fallback
+    any more; a thin set is whatever it is — every kept row is already in).
+    House framing mapping (Bank build's): face→face, bust→half, body→full; a
+    back view is not an identity reference and is never picked. Inside a
+    bucket, scored rows lead (face_score DESC)."""
     by: dict[str, list] = {'face': [], 'half': [], 'full': []}
     for row in images:
         if getattr(row, 'status', None) != 'keep' or not getattr(row, 'filename', None):
@@ -107,7 +125,7 @@ def pick_images(images) -> list:
         by[{'face': 'face', 'bust': 'half'}.get(fr, 'full')].append(row)
     for bucket in by.values():
         bucket.sort(key=lambda r: (r.face_score is None, -(r.face_score or 0), r.id))
-    picked = (_yaw_spread(by['face'], _MAX_FACE)
+    picked = (_face_order(by['face'], _MAX_FACE)
               + by['half'][:_MAX_HALF] + by['full'][:_MAX_FULL])
     if not (by['face'] or by['half']):
         # A dataset with only full frames has no closer option — clothing is
@@ -115,23 +133,6 @@ def pick_images(images) -> list:
         picked = by['full'][:12]
     return picked[:_MAX_FACE + _MAX_HALF + _MAX_FULL]
 
-
-def _yaw_spread(rows, limit):
-    """Pick up to `limit` faces spreading across head angle: greedily take the
-    candidate whose yaw is farthest from every yaw already picked (score breaks
-    ties), then fill the rest in score order. Rows without a yaw cannot be
-    spread, so they only enter the fill phase."""
-    known = [r for r in rows if r.face_yaw is not None]
-    unknown = [r for r in rows if r.face_yaw is None]
-    picked, yaws = [], []
-    while known and len(picked) < limit:
-        best = known[0] if not picked else max(
-            known, key=lambda r: (min(abs(r.face_yaw - y) for y in yaws),
-                                  r.face_score or 0))
-        known.remove(best)
-        picked.append(best)
-        yaws.append(best.face_yaw)
-    return (picked + unknown)[:limit]
 
 
 def _kept_rows(ds):
@@ -367,6 +368,63 @@ def current_stage(ds_id):
     return _STAGES.get(int(ds_id))
 
 
+def _sharpness(path):
+    """Cheap focus proxy: stddev of the FIND_EDGES pass (in-process PIL, no
+    subprocess) — sharper picture, higher value."""
+    try:
+        from PIL import Image, ImageFilter, ImageStat
+        with Image.open(path) as im:
+            return ImageStat.Stat(
+                im.convert('L').filter(ImageFilter.FIND_EDGES)).stddev[0]
+    except Exception:                                            # noqa: BLE001
+        return 0.0
+
+
+_FILL_FRAMINGS = {'face': ('face',), 'half': ('bust',), 'full': ('body', 'full')}
+
+
+def _fill_from_pending(ds, by, note):
+    """Kept counts under quota → promote the best PENDING rows of the SAME
+    framing to keep, ranked by similarity (face_score) then sharpness:
+    缺脸找脸，缺全身找全身 — the triage pile is the first place the mod looks
+    before it starts cropping. 'reject' is a decision and is never overridden;
+    a pending row without a file on disk is skipped. Returns (count, note).
+    ponytail: sharpness is an edge-energy proxy, computed for the candidate
+    pool only — swap in a real focus model if the ranking measurably misfires."""
+    quotas = {'face': _MAX_FACE, 'half': _MAX_HALF, 'full': _MAX_FULL}
+    storage = Path(dataset_path(ds.id))
+    total = 0
+    for bucket, quota in quotas.items():
+        deficit = quota - len(by[bucket])
+        if deficit <= 0:
+            continue
+        from sqlalchemy import or_
+        candidates = (FaceDatasetImage.query
+                      .filter_by(dataset_id=ds.id, status='pending')
+                      .filter(FaceDatasetImage.framing.in_(_FILL_FRAMINGS[bucket]))
+                      .filter(FaceDatasetImage.filename.isnot(None))
+                      .filter(or_(FaceDatasetImage.face_state.is_(None),
+                                  FaceDatasetImage.face_state.notin_(_BAD_FACE_STATES)))
+                      .all())
+        ranked = sorted(candidates, key=lambda r: (
+            (r.face_state or '') in _WEAK_FACE_STATES,
+            -(r.face_score or 0),
+            -_sharpness(str(storage / r.filename)), r.id))
+        fills = ranked[:deficit]
+        if not fills:
+            continue
+        for r in fills:
+            r.status = 'keep'
+        by[bucket].extend(fills)
+        total += len(fills)
+        note += (f'; {len(fills)} {bucket} frame(s) promoted from the triage '
+                 f'pile (similarity+sharpness)')
+    if total:
+        from ..extensions import db
+        db.session.commit()
+    return total, note
+
+
 def generate_for_dataset(ds, masked=False) -> dict:
     """Encode ds's kept images into one RefMod. Synchronous (~1-3 min: the VAE
     load dominates); the caller holds the GPU vision window.
@@ -395,6 +453,9 @@ def _generate_for_dataset(ds, masked=False) -> dict:
         if fr != 'back':
             by[{'face': 'face', 'bust': 'half'}.get(fr, 'full')].append(row)
     note = ''
+    promoted, note = _fill_from_pending(ds, by, note)
+    if promoted:
+        note = f'{promoted} frame(s) promoted from the triage pile' + note
     deficit = _MAX_FACE - len(by['face'])
     if deficit > 0:
         pickups, note = _harvest_face_crops(ds, by['half'] + by['full'], deficit, note)

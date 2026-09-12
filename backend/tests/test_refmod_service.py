@@ -12,12 +12,14 @@ import pytest
 
 
 # ── service: image picking ────────────────────────────────────────────────────
-def _img(id_, status, framing, filename='f.webp', face_score=None, face_yaw=None):
-    # face_score/face_yaw: real rows carry the scorer's values; pick_images
-    # sorts on score and spreads the face bucket across yaw, so stubs must
-    # carry both (None sorts/fills last, deterministic).
+def _img(id_, status, framing, filename='f.webp', face_score=None,
+         face_yaw=None, face_state='scorable'):
+    # face_score/face_yaw/face_state: real rows carry the scorer's values;
+    # the picker sorts on score, spreads by yaw and demotes weak states, so
+    # stubs must carry all three (None sorts/fills last, deterministic).
     return SimpleNamespace(id=id_, status=status, framing=framing, filename=filename,
-                           face_score=face_score, face_yaw=face_yaw)
+                           face_score=face_score, face_yaw=face_yaw,
+                           face_state=face_state)
 
 
 def test_pick_images_identity_first():
@@ -122,7 +124,7 @@ class _FakeRows:
             f.write_bytes(b'x')
             rows.append(SimpleNamespace(id=i, status='keep', framing=framing,
                                         filename=f.name, face_score=None,
-                                        face_yaw=None))
+                                        face_yaw=None, face_state='scorable'))
         self.images = rows
         self.id = 7
         self.name = 'test person'
@@ -146,6 +148,8 @@ def test_generate_for_dataset_parses_worker_json(tmp_path, monkeypatch):
     monkeypatch.setattr(svc, '_kept_rows', lambda d: d.images)
     monkeypatch.setattr(svc, '_harvest_face_crops',
                         lambda ds, sources, deficit, note: ([], note))
+    monkeypatch.setattr(svc, '_fill_from_pending',
+                        lambda ds_, by, note: (0, note))
     monkeypatch.setattr(svc.face_mask_service, 'generate_face_masks',
                         lambda imgs, out_dir, expand=None, timeout=1800: {})
     monkeypatch.setattr(svc, '_comfy_root', lambda: tmp_path)
@@ -175,6 +179,8 @@ def test_worker_failure_raises_runtimeerror_with_stderr_tail(tmp_path, monkeypat
     monkeypatch.setattr(svc, '_kept_rows', lambda d: d.images)
     monkeypatch.setattr(svc, '_harvest_face_crops',
                         lambda ds, sources, deficit, note: ([], note))
+    monkeypatch.setattr(svc, '_fill_from_pending',
+                        lambda ds_, by, note: (0, note))
     monkeypatch.setattr(svc.face_mask_service, 'generate_face_masks',
                         lambda imgs, out_dir, expand=None, timeout=1800: {})
     monkeypatch.setattr(svc, '_comfy_root', lambda: tmp_path)
@@ -203,6 +209,8 @@ def test_unsafe_dataset_name_sanitizes(tmp_path, monkeypatch):
     monkeypatch.setattr(svc, '_kept_rows', lambda d: d.images)
     monkeypatch.setattr(svc, '_harvest_face_crops',
                         lambda ds, sources, deficit, note: ([], note))
+    monkeypatch.setattr(svc, '_fill_from_pending',
+                        lambda ds_, by, note: (0, note))
     monkeypatch.setattr(svc.face_mask_service, 'generate_face_masks',
                         lambda imgs, out_dir, expand=None, timeout=1800: {})
     monkeypatch.setattr(svc, '_comfy_root', lambda: tmp_path)
@@ -427,6 +435,8 @@ def test_generation_publishes_and_clears_stage(tmp_path, monkeypatch):
     monkeypatch.setattr(svc, '_kept_rows', lambda d: d.images)
     monkeypatch.setattr(svc, '_harvest_face_crops',
                         lambda ds_, sources, deficit, note: ([], note))
+    monkeypatch.setattr(svc, '_fill_from_pending',
+                        lambda ds_, by, note: (0, note))
     monkeypatch.setattr(svc.face_mask_service, 'generate_face_masks',
                         lambda imgs, out_dir, expand=None, timeout=1800: {})
     monkeypatch.setattr(svc, '_comfy_root', lambda: tmp_path)
@@ -452,6 +462,8 @@ def test_generation_clears_stage_on_failure(tmp_path, monkeypatch):
     monkeypatch.setattr(svc, '_kept_rows', lambda d: d.images)
     monkeypatch.setattr(svc, '_harvest_face_crops',
                         lambda ds_, sources, deficit, note: ([], note))
+    monkeypatch.setattr(svc, '_fill_from_pending',
+                        lambda ds_, by, note: (0, note))
     monkeypatch.setattr(svc.face_mask_service, 'generate_face_masks',
                         lambda imgs, out_dir, expand=None, timeout=1800: {})
     monkeypatch.setattr(svc, '_comfy_root', lambda: tmp_path)
@@ -474,3 +486,91 @@ def test_refmod_progress_route_reports_stage(app, client):
     finally:
         svc.set_refmod_stage(7, None)
     assert client.get('/api/dataset/7/refmod/progress').get_json() == {'stage': None}
+
+
+# ── triage-pile fill: kept short → promote pending by similarity+sharpness ────
+def test_fill_from_pending_promotes_best_per_category(app, tmp_path):
+    """缺脸找脸，缺全身找全身: pending rows of the matching framing are
+    promoted to keep (similarity first, sharpness breaks ties), 'back' /
+    'reject' / file-less rows are never taken, and each bucket grows by
+    exactly its deficit — or by whatever the pile has, whichever is less."""
+    import os
+    from PIL import Image
+    from app.services import refmod_service as svc
+    from app.services.dataset_storage import dataset_path
+    from app.models import FaceDataset, FaceDatasetImage
+    from app.extensions import db
+
+    with app.app_context():
+        ds = FaceDataset(name='fill ds', trigger_word='t')
+        db.session.add(ds)
+        db.session.commit()
+        ddir = dataset_path(ds.id)
+        os.makedirs(ddir, exist_ok=True)
+        rows_all = []
+
+        def row(status, framing, score, blur=False):
+            name = f'{status}_{framing}_{score}_{len(rows_all)}.png'
+            Image.new('RGB', (64, 64),
+                      (0, 0, 0) if blur else (255, 255, 255)).save(
+                os.path.join(ddir, name))
+            r = FaceDatasetImage(dataset_id=ds.id, status=status,
+                                 framing=framing, filename=name,
+                                 face_score=score)
+            db.session.add(r)
+            rows_all.append(r)
+            return r
+
+        # kept: 1 face, 1 bust, 0 full → deficits 11 / 3 / 4
+        row('keep', 'face', 0.9)
+        row('keep', 'bust', 0.8)
+        # 12 pending faces (score 0.8): 10 sharp + 2 blurred — 11 slots, and
+        # sharpness is the tie-break that leaves a blurred one out.
+        faces = [row('pending', 'face', 0.8, blur=(i >= 10)) for i in range(12)]
+        busts = [row('pending', 'bust', 0.6) for _ in range(3)]
+        bodies = [row('pending', 'body', 0.5 + i / 10) for i in range(6)]
+        row('pending', 'back', 0.99)                     # wrong category
+        fileless = FaceDatasetImage(dataset_id=ds.id, status='pending',
+                                    framing='face', filename=None,
+                                    face_score=0.99)
+        db.session.add(fileless)
+        db.session.commit()
+
+        by = {'face': [r for r in rows_all if r.status == 'keep'
+                       and r.framing == 'face'],
+              'half': [r for r in rows_all if r.status == 'keep'
+                       and r.framing == 'bust'],
+              'full': []}
+
+        count, note = svc._fill_from_pending(ds, by, note='')
+        assert count == 11 + 3 + 4, note
+        assert len(by['face']) == 12 and len(by['half']) == 4
+        assert len(by['full']) == 4
+        promoted_ids = {r.id for r in by['face'][1:]}
+        assert all(f.id in promoted_ids for f in faces[:10]), 'sharp faces fill first'
+        assert faces[11].id not in promoted_ids,             'sharpness breaks the tie — the least sharp face fills last'
+        assert fileless.status == 'pending', 'file-less rows are skipped'
+        assert all(r.status == 'keep' for r in by['full']),             'promoted fulls are SAVED (kept), not just borrowed'
+        assert [r.id for r in by['full']] == [r.id for r in list(reversed(bodies))[:4]],             'higher-similarity fulls fill first'
+        assert 'promoted from the triage pile' in note
+
+
+
+
+def test_pick_images_frontal_first_avoids_occluded():
+    """正脸优先，侧脸为辅，避开遮挡: the face bucket orders by |yaw| (frontal
+    first, profiles after), dead states are excluded outright, and low_det /
+    extreme_pose — the occluded/extreme ones — demote to the tail."""
+    from app.services import refmod_service as svc
+
+    rows = [
+        _img(1, 'keep', 'face', face_score=0.9, face_yaw=45),            # profile
+        _img(2, 'keep', 'face', face_score=0.7, face_yaw=3),             # frontal
+        _img(3, 'keep', 'face', face_score=0.8, face_yaw=10, face_state='low_det'),
+        _img(4, 'keep', 'face', face_score=0.6, face_yaw=60, face_state='extreme_pose'),
+        _img(5, 'keep', 'face', face_score=0.99, face_yaw=0, face_state='no_face'),
+        _img(6, 'keep', 'face', face_score=None, face_yaw=8),            # frontal, unscored
+    ]
+    faces = [r.id for r in svc.pick_images(rows) if r.framing == 'face']
+    assert faces == [2, 6, 1, 3, 4], faces
+    assert 5 not in faces, 'a no_face row is not a face reference'
