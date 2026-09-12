@@ -75,6 +75,20 @@ def build_command(exe, input_path, output_dir, *, format=PNG, upscale=True,
     return cmd
 
 
+def _clean_env():
+    """Child env without Git-for-Windows dirs: when the backend is launched from
+    Git Bash, tpai.exe picks up Git's perl from PATH and dies on
+    'failed to load Config_git.pl' before touching an image."""
+    env = os.environ.copy()
+    bad = ('git', 'mingw', 'perl', 'usr\\bin', '/usr/bin')
+    env['PATH'] = os.pathsep.join(
+        p for p in env.get('PATH', '').split(os.pathsep)
+        if p and not any(k in p.lower() for k in bad))
+    for k in [k for k in env if k.upper().startswith('PERL')]:
+        env.pop(k)
+    return env
+
+
 def run_tpai(exe, input_path, output_dir, *, timeout=DEFAULT_TIMEOUT_S, **toggles):
     """Run one image through Topaz. Returns (status, message) where status is
     one of 'ok' | 'partial' | 'no_valid_files' | 'license' | 'bad_args' |
@@ -82,7 +96,8 @@ def run_tpai(exe, input_path, output_dir, *, timeout=DEFAULT_TIMEOUT_S, **toggle
     decides what each status means for the job."""
     cmd = build_command(exe, input_path, output_dir, **toggles)
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
+                              env=_clean_env())
     except subprocess.TimeoutExpired:
         return 'timeout', f'Topaz did not finish within {timeout // 60} minutes'
     except OSError as e:

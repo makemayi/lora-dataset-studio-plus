@@ -64,6 +64,21 @@ _MAX_COVERAGE = 0.5
 _FEATHER_FRAC = 0.03
 
 
+def _yaw_from_kps(kps):
+    """Coarse yaw proxy in [-1, 1] from the InsightFace keypoints: how centred
+    the nose sits between the two eyes. ~0 = front, |value| grows with head
+    turn; the SIGN convention is arbitrary but consistent. A diversity signal
+    for face picking, not a measurement."""
+    try:
+        (lex, _), (rex, _), (nx, _) = kps[0], kps[1], kps[2]
+    except (TypeError, IndexError):
+        return None
+    dl, dr = abs(nx - lex), abs(nx - rex)
+    if dl + dr <= 0:
+        return None
+    return round(float((dr - dl) / (dl + dr)), 3)
+
+
 def _log(msg):
     print(msg, file=sys.stderr, flush=True)
 
@@ -190,12 +205,16 @@ def main() -> int:
             # Boxes are reported NORMALISED (0-1, relative to the real image) so the
             # preview can draw them on an <img> of any displayed size, and the pad
             # rescue's offset is undone here rather than leaking into the UI.
-            boxes = []
+            boxes, face_meta = [], []
             for f in faces:
                 x1, y1, x2, y2 = (float(v) for v in f.bbox[:4])
                 x1, x2 = (x1 - pad) / w, (x2 - pad) / w
                 y1, y2 = (y1 - pad) / h, (y2 - pad) / h
                 boxes.append([x1, y1, x2, y2])
+                face_meta.append({
+                    'det_score': round(float(getattr(f, 'det_score', 0) or 0), 3),
+                    'yaw': _yaw_from_kps(getattr(f, 'kps', None)),
+                    'area': max(0.0, x2 - x1) * max(0.0, y2 - y1)})
             if not boxes:
                 # No face is a NORMAL outcome, not an error: a concept dataset may
                 # legitimately hold no people at all. An all-white mask is an exact
@@ -226,7 +245,8 @@ def main() -> int:
             elif out_dir:
                 r = max(1, int(min(w, h) * _FEATHER_FRAC))
                 mask = mask.filter(ImageFilter.GaussianBlur(radius=r))
-            results[p] = {"state": state, "boxes": boxes, "coverage": round(covered, 4)}
+            results[p] = {"state": state, "boxes": boxes, "coverage": round(covered, 4),
+                          "faces": face_meta}
             if out_dir:
                 name = os.path.splitext(os.path.basename(p))[0] + '.png'
                 mask.save(os.path.join(out_dir, name), 'PNG')
