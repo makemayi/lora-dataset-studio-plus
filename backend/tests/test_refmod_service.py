@@ -12,8 +12,12 @@ import pytest
 
 
 # ── service: image picking ────────────────────────────────────────────────────
-def _img(id_, status, framing, filename='f.webp'):
-    return SimpleNamespace(id=id_, status=status, framing=framing, filename=filename)
+def _img(id_, status, framing, filename='f.webp', face_score=None, face_yaw=None):
+    # face_score/face_yaw: real rows carry the scorer's values; pick_images
+    # sorts on score and spreads the face bucket across yaw, so stubs must
+    # carry both (None sorts/fills last, deterministic).
+    return SimpleNamespace(id=id_, status=status, framing=framing, filename=filename,
+                           face_score=face_score, face_yaw=face_yaw)
 
 
 def test_pick_images_identity_first():
@@ -23,13 +27,13 @@ def test_pick_images_identity_first():
     # full frames are the clothing carrier and clothing is what the user wants
     # OUT of the reference.
     rows = ([_img(i, 'keep', 'face') for i in range(30)]
-            + [_img(100 + i, 'keep', 'half') for i in range(8)]
+            + [_img(100 + i, 'keep', 'bust') for i in range(8)]
             + [_img(200 + i, 'keep', 'full') for i in range(5)]
             + [_img(300, 'pending', 'face'), _img(301, 'reject', 'half')])
     picked = svc.pick_images(rows)
     assert len(picked) == 16          # 12 face + 4 half (cap), 0 full
     assert sum(r.framing == 'face' for r in picked) == 12
-    assert sum(r.framing == 'half' for r in picked) == 4
+    assert sum(r.framing == 'bust' for r in picked) == 4
     assert not any(r.framing == 'full' for r in picked)
     assert all(r.status == 'keep' for r in picked)
 
@@ -39,7 +43,7 @@ def test_pick_images_tops_up_fulls_only_when_thin():
 
     # 4 face + 1 half: fulls top the set up to the 6-row floor.
     rows = ([_img(i, 'keep', 'face') for i in range(4)]
-            + [_img(50, 'keep', 'half')]
+            + [_img(50, 'keep', 'bust')]
             + [_img(100 + i, 'keep', 'full') for i in range(9)])
     picked = svc.pick_images(rows)
     assert len(picked) == 6
@@ -59,7 +63,10 @@ def test_pick_images_treats_unknown_framing_as_full():
 
     rows = [_img(1, 'keep', None), _img(2, 'keep', 'back'), _img(3, 'keep', 'full')]
     picked = svc.pick_images(rows)
-    assert len(picked) == 3
+    # Unknown framing lands in the full bucket; a back view is never an
+    # identity reference and is never picked.
+    assert [r.id for r in picked] == [1, 3]
+    assert not any(r.framing == 'back' for r in picked)
 
 
 # ── service: path resolution fails with a remedy ─────────────────────────────
@@ -109,11 +116,12 @@ class _FakeRows:
         storage = tmp_path / 'datasets' / '7'
         storage.mkdir(parents=True)
         rows = []
-        for i, framing in enumerate(['face', 'half', 'full']):
+        for i, framing in enumerate(['face', 'bust', 'full']):
             f = storage / f'img{i}.webp'
             f.write_bytes(b'x')
             rows.append(SimpleNamespace(id=i, status='keep', framing=framing,
-                                        filename=f.name))
+                                        filename=f.name, face_score=None,
+                                        face_yaw=None))
         self.images = rows
         self.id = 7
         self.name = 'test person'
@@ -135,6 +143,8 @@ def test_generate_for_dataset_parses_worker_json(tmp_path, monkeypatch):
 
     monkeypatch.setattr(svc.subprocess, 'run', fake_run)
     monkeypatch.setattr(svc, '_kept_rows', lambda d: d.images)
+    monkeypatch.setattr(svc, '_harvest_face_crops',
+                        lambda ds, sources, deficit, note: ([], note))
     monkeypatch.setattr(svc.face_mask_service, 'generate_face_masks',
                         lambda imgs, out_dir, expand=None, timeout=1800: {})
     monkeypatch.setattr(svc, '_comfy_root', lambda: tmp_path)
@@ -161,6 +171,8 @@ def test_worker_failure_raises_runtimeerror_with_stderr_tail(tmp_path, monkeypat
 
     monkeypatch.setattr(svc.subprocess, 'run', fake_run)
     monkeypatch.setattr(svc, '_kept_rows', lambda d: d.images)
+    monkeypatch.setattr(svc, '_harvest_face_crops',
+                        lambda ds, sources, deficit, note: ([], note))
     monkeypatch.setattr(svc.face_mask_service, 'generate_face_masks',
                         lambda imgs, out_dir, expand=None, timeout=1800: {})
     monkeypatch.setattr(svc, '_comfy_root', lambda: tmp_path)
@@ -187,6 +199,8 @@ def test_unsafe_dataset_name_sanitizes(tmp_path, monkeypatch):
 
     monkeypatch.setattr(svc.subprocess, 'run', fake_run)
     monkeypatch.setattr(svc, '_kept_rows', lambda d: d.images)
+    monkeypatch.setattr(svc, '_harvest_face_crops',
+                        lambda ds, sources, deficit, note: ([], note))
     monkeypatch.setattr(svc.face_mask_service, 'generate_face_masks',
                         lambda imgs, out_dir, expand=None, timeout=1800: {})
     monkeypatch.setattr(svc, '_comfy_root', lambda: tmp_path)
