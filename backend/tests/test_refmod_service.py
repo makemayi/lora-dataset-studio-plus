@@ -323,3 +323,70 @@ def test_route_refmod_gpu_busy_maps_to_503(app, client, monkeypatch):
     monkeypatch.setattr(routes.refmod_service, 'generate_for_dataset', fake_generate)
     resp = client.post('/api/dataset/5/refmod')
     assert resp.status_code == 503
+
+
+# ── harvest: smart face recovery tiers ────────────────────────────────────────
+def test_harvest_tiers_crops_into_face_recovery_values(app, tmp_path, monkeypatch):
+    """_harvest_face_crops KNOWS each crop's face pixel size (it just measured
+    the box) — the Topaz pass must tier crops and run one pass per value, so
+    no crop meets Autopilot's 0.8-on-every-face default. Big-face crop -> off,
+    small-face crop -> its tier strength, persisted as face rows either way."""
+    from app.services import refmod_service as rs
+    from app.services import topaz_helper as th
+    from app.services.dataset_storage import dataset_path
+    from app.models import FaceDataset, FaceDatasetImage
+    from app.extensions import db
+    from PIL import Image
+
+    with app.app_context():
+        ds = FaceDataset(name='harvest ds', trigger_word='t')
+        db.session.add(ds)
+        db.session.commit()
+        ddir = dataset_path(ds.id)
+        os.makedirs(ddir, exist_ok=True)
+
+        # 1000x1000 source, face box 0.6x0.6 -> face 600px short side -> OFF.
+        # 500x400 source, face box 0.5x0.5 -> face 200px short side -> 0.50.
+        specs = [('a.png', 1000, 1000, 0.6, {'area': 0.36}),
+                 ('b.png', 500, 400, 0.5, {'area': 0.25})]
+        sources, recs = [], {}
+        for name, w, h, box, face in specs:
+            Image.new('RGB', (w, h), (128, 128, 128)).save(os.path.join(ddir, name))
+            img = FaceDatasetImage(dataset_id=ds.id, filename=name, status='keep')
+            db.session.add(img)
+            db.session.flush()
+            sources.append(img)
+            half = (1 - box) / 2
+            recs[name] = {'state': 'masked', 'faces': [dict(face, det_score=0.9)],
+                          'boxes': [[half, half, half + box, half + box]]}
+        db.session.commit()
+
+        from pathlib import Path as _P
+
+        def fake_detect(imgs):
+            return {'ok': True, 'results': {
+                p: recs.get(_P(p).name) or {'faces': [{'det_score': 0.9}],
+                                            'boxes': []}
+                for p in imgs}}
+
+        monkeypatch.setattr(rs.face_mask_service, 'detect_faces', fake_detect)
+        monkeypatch.setattr(th, 'preflight', lambda: 'tpai')
+        monkeypatch.setattr(th, 'resolve_exe', lambda: 'tpai')
+        seen = []
+
+        def fake_run_tpai(exe, input_path, output_dir, **kw):
+            seen.append(kw.get('face_recovery'))
+            import pathlib as _pathlib
+            out = _pathlib.Path(output_dir)
+            out.mkdir(parents=True, exist_ok=True)
+            for f in _pathlib.Path(input_path).iterdir():
+                (out / (f.stem + '.png')).write_bytes(b'up')
+            return 'ok', ''
+
+        monkeypatch.setattr(th, 'run_tpai', fake_run_tpai)
+
+        rows, note = rs._harvest_face_crops(ds, sources, deficit=4, note='')
+        assert sorted(seen, key=str) == [0.5, False], \
+            f'one tpai pass per tier, got {seen}'
+        assert len(rows) == 2 and all(r.derivation_kind == rs._CROP_KIND
+                                      for r in rows), note

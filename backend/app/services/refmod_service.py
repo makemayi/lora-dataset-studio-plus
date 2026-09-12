@@ -231,6 +231,7 @@ def _harvest_face_crops(ds, sources, deficit, note):
     from . import topaz_helper
     tmp_in = None
     staged = []   # (src_row, tmp_path, yaw) crops awaiting Topaz/persist
+    crop_face_px = {}   # tmp_path -> largest face's SHORT side in crop pixels
     for idx, row in enumerate(sources):
         rec = results.get(paths[idx]) or {}
         if rec.get('state') not in ('masked', 'too_large', 'ok') or not rec.get('faces'):
@@ -270,8 +271,12 @@ def _harvest_face_crops(ds, sources, deficit, note):
                 import tempfile
                 tmp_in = tempfile.mkdtemp(prefix='lds-refmod-crops-')
             name = f'crop_{row.id}.png'
-            crop.save(os.path.join(tmp_in, name), 'PNG')
-            staged.append((row, os.path.join(tmp_in, name), meta.get('yaw')))
+            path = os.path.join(tmp_in, name)
+            crop.save(path, 'PNG')
+            # Face pixels are invariant under cropping — the box was just
+            # measured on the source, so the crop's face size comes free.
+            crop_face_px[path] = min(bw, bh)
+            staged.append((row, path, meta.get('yaw')))
             if len(face_rows) + len(staged) >= deficit:   # 剪图凑够：缺几张补几张
                 break
         except Exception:  # noqa: BLE001 — one bad source must not stop the harvest
@@ -280,16 +285,28 @@ def _harvest_face_crops(ds, sources, deficit, note):
         return [], note
     # Upscale EVERY crop first — the quality judge runs on the UPSCALED image,
     # not on the tiny source: a 170px face is exactly what Topaz exists for.
+    # Smart face recovery: face pixel size is ALREADY known per crop (measured
+    # at crop time) — tier crops and run one tpai pass per value, so no crop
+    # ever meets Autopilot's 0.8-on-every-face wax default. Failure leaves the
+    # tier's crops raw, exactly like the old single-pass failure path.
     upscaled_dir = None
     try:
         topaz_helper.preflight()
         import tempfile
         upscaled_dir = tempfile.mkdtemp(prefix='lds-refmod-topaz-')
-        status, message = topaz_helper.run_tpai(
-            topaz_helper.resolve_exe(), tmp_in, upscaled_dir,
-            timeout=120 + 90 * len(staged))
-        if status not in ('ok', 'partial', None):   # run_tpai 返回状态字符串，不是退出码
-            note += f'; Topaz failed ({message}) — crops stay raw'
+        by_val = {}
+        for path, px in crop_face_px.items():
+            by_val.setdefault(topaz_helper.face_recovery_value(px), []).append(path)
+        for value, crop_paths in sorted(by_val.items(), key=lambda kv: str(kv[0])):
+            tier_dir = os.path.join(tmp_in, f'v{value}')
+            os.makedirs(tier_dir, exist_ok=True)
+            for p in crop_paths:
+                shutil.move(p, os.path.join(tier_dir, os.path.basename(p)))
+            status, message = topaz_helper.run_tpai(
+                topaz_helper.resolve_exe(), tier_dir, upscaled_dir,
+                face_recovery=value, timeout=120 + 90 * len(crop_paths))
+            if status not in ('ok', 'partial', None):   # run_tpai 返回状态字符串，不是退出码
+                note += f'; Topaz failed ({message}) — crops stay raw'
     except Exception as e:  # noqa: BLE001 — Topaz is an enhancement, never a gate
         note += f'; Topaz unavailable ({e}) — crops stay raw'
     # Final file per crop: the upscaled one where Topaz produced it, raw otherwise.
