@@ -607,13 +607,13 @@ def test_identity_hint_composes_prefix_and_description(app, tmp_path, monkeypatc
             svc, '_llama_describe',
             lambda paths_, prompt, timeout=300:
                 (calls.append(list(paths_)),
-                 '圆脸，单眼皮，肤色白皙，左眼角有一颗痣' if '身份特征' in prompt
-                 else '黑色长发中分')[1])
+                 ('圆脸，单眼皮，肤色白皙，左眼角有一颗痣，黑色长发中分'
+                  if '身份特征' in prompt else '黑色长发中分'))[1])
         monkeypatch.setattr(
             'app.services.refmod_service.os.path.getsize', lambda p: 1024)
         hint, note = svc._identity_hint(ds, paths, picked, note='')
-        assert calls == [paths[:3], paths[:1]], \
-            'one identity call with up to 3 face frames, then one hair-only call'
+        assert calls == [paths], \
+            'one identity call carrying both face frames'
         assert note == ''
         # 发型不能漏: the identity answer carried no hair — the fallback asked
         # for it alone and appended it.
