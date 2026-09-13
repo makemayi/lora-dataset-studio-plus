@@ -50,6 +50,15 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-09-13-refmod-12-frames-pooled',
+    date: '2026-09-13',
+    title: '⚡ RefMod lite: 12 frames, pooled reference — ~4x faster generation',
+    blurb: 'The reference now carries 12 frames (4 frontal + 2 profile + 4 '
+      + 'bust + 2 full) pooled to a 32×32 latent grid — ~3k reference '
+      + 'tokens instead of ~20k, so workflows with a loaded RefMod run '
+      + 'much faster while keeping face, angles, body and clothing.'
+  },
+  {
     id: '2026-09-13-video-promote-framing',
     date: '2026-09-13',
     title: '🏷️ Video-bank frame promotions now carry their framing',
