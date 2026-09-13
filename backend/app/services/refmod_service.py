@@ -464,6 +464,34 @@ _HAIR_PROMPT = ('只描述这个人的发型和发色，一个逗号短语，15�
 
 
 _LLAMA_BASE = 'http://127.0.0.1:8080'   # the local llama.cpp llama-server
+_HINT_REWRITE = ('把下面的照片特征描述改写成一行中文逗号分隔短语，只保留：脸型、眼、'
+                 '眉、鼻唇、发型与发色、肤色、脸部特征点（痣等）、脸部饰品（眼镜/耳饰）。'
+                 '删除表情、光线、背景、对要求本身的复述等一切其它内容。直接输出短语行。')
+
+
+def _llama_text(prompt, timeout=300):
+    """Text-only chat through the local llama-server (auto model). Returns the
+    content (reasoning_content fallback) or '' on any failure."""
+    try:
+        with urllib.request.urlopen(f'{_LLAMA_BASE}/v1/models', timeout=10) as r:
+            models = json.load(r).get('data') or []
+        model = next((m['id'] for m in models if m.get('id')), '')
+        if not model:
+            return ''
+        body = json.dumps({
+            'model': model, 'max_tokens': 300, 'temperature': 0.2,
+            'stream': False,
+            'messages': [{'role': 'user', 'content': prompt}]},
+            ensure_ascii=False).encode('utf-8')
+        req = urllib.request.Request(
+            f'{_LLAMA_BASE}/v1/chat/completions', data=body,
+            headers={'Content-Type': 'application/json'})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            msg = (json.load(r).get('choices') or [{}])[0].get('message') or {}
+        return (msg.get('content') or msg.get('reasoning_content') or '').strip()
+    except Exception as e:                                       # noqa: BLE001
+        logger.warning('refmod: llama text call failed: %s', e)
+        return ''
 
 
 def _llama_describe(image_paths, prompt, timeout=600):
@@ -474,11 +502,22 @@ def _llama_describe(image_paths, prompt, timeout=600):
     hint say 无眼镜 when she wears glasses in another). Model auto-picked
     from /v1/models; thinking models spend small budgets on
     reasoning_content, so that field is the fallback. Returns '' on failure."""
-    import base64
+    import base64, io
     b64s = []
     for p in image_paths[:3]:
-        with open(p, 'rb') as f:
-            b64s.append(base64.b64encode(f.read()).decode('ascii'))
+        # 描述不需要原始分辨率：Topaz 输出的 2048px PNG base64 后 ~5MB/张，
+        # 3 张直接撞 llama-server 的请求体积上限（HTTP 413，实测）。缩到
+        # 768px JPEG —— 视觉模型读特征足够，负载 ~0.3MB/张。
+        try:
+            from PIL import Image
+            with Image.open(p) as im:
+                im = im.convert('RGB')
+                im.thumbnail((768, 768))
+                buf = io.BytesIO()
+                im.save(buf, 'JPEG', quality=85)
+            b64s.append(base64.b64encode(buf.getvalue()).decode('ascii'))
+        except Exception as e:                                   # noqa: BLE001
+            logger.warning('refmod: hint frame %s unreadable: %s', p, e)
     if not b64s:
         return ''
     try:
@@ -517,7 +556,8 @@ def _llama_describe(image_paths, prompt, timeout=600):
 
 
 _META_MARKS = ('格式', '统计', '观察', '方案', '提示词', '不超过', '流程',
-               '草稿', '字数')
+               '草稿', '字数', '逗号分隔', '八项', '最后一行', '必须体现',
+               '综合所有照片', '可以描述为', '需要包含', '身份特征')
 _META_CHARS = (':', '：', '(', '（')   # colons/parens = scratchpad, not answer
 
 
@@ -530,23 +570,27 @@ def _clean_hint_desc(desc):
     keep the DENSEST comma list (≥2 separators, ≤100 chars) — the answer
     carries 6+, meta lines 1-2. If nothing qualifies, fall back to the longest
     colon-free segment instead of the raw flattened dump."""
-    best, best_seps = '', -1
-    fallback = ''
-    for ln in desc.splitlines():
-        seg = ln.strip().split('：')[-1].split(':')[-1]
+    lines = [ln.strip() for ln in desc.splitlines() if ln.strip()]
+    # 从后往前：答案总在推理之后；第一个 ≥2 逗号、无元标记的行即答案。
+    # 元标记过滤器拦住提示词回显（'最后一行用逗号分隔的短语…'这类）。
+    for ln in reversed(lines):
+        seg = ln.split('：')[-1].split(':')[-1]
         seg = re.sub(r'^[\d\.\*\-\s]+', '', seg).strip()
         seg = re.sub(r'\s+', '', seg)
         if not seg or len(seg) > 100:
             continue
         if any(k in seg for k in _META_MARKS) or any(c in seg for c in _META_CHARS):
-            if len(seg) > len(fallback):
-                fallback = seg
             continue
-        seps = seg.count('，') + seg.count(',')
-        if seps >= 2 and seps > best_seps:
-            best, best_seps = seg, seps
-    if best:
-        return best.rstrip('。.,，')
+        if seg.count('，') + seg.count(',') >= 2:
+            return seg.rstrip('。.,，')
+    fallback = ''
+    for ln in lines:
+        seg = re.sub(r'\s+', '', ln.split('：')[-1].split(':')[-1])
+        if (seg and len(seg) <= 100
+                and not any(k in seg for k in _META_MARKS)
+                and not any(c in seg for c in _META_CHARS)
+                and len(seg) > len(fallback)):
+            fallback = seg
     return fallback[:80].rstrip('。.,，') or re.sub(r'\s+', '', desc)[:60]
 
 
@@ -565,14 +609,16 @@ def _identity_hint(ds, image_paths, picked, note):
     if not targets:
         return prefix, note
     try:
-        desc = _llama_describe(targets, _HINT_PROMPT)
+        raw = _llama_describe(targets, _HINT_PROMPT)
     except Exception as e:                                       # noqa: BLE001
         logger.warning('refmod: identity hint unavailable: %s', e)
-        desc = ''
-    if not desc:
+        raw = ''
+    if not raw:
         note += '; identity hint unavailable (vision model silent) — prefix only'
         return prefix, note
-    clean = _clean_hint_desc(desc)
+    # 思考模型会把草稿连着答案一起吐出来——用一次纯文本改写调用把它压成
+    # 规范单行，比逐个 dump 打补丁可靠（rewrite 失败则退回原始描述）。
+    clean = _clean_hint_desc(_llama_text(_HINT_REWRITE + '\n\n' + raw) or raw)
     # 发型不能漏 (user rule): if the answer skipped the hair, ask for it alone
     if not any(k in clean for k in ('发', '刘海')):
         hair = _llama_describe(targets[:1], _HAIR_PROMPT, timeout=180)
