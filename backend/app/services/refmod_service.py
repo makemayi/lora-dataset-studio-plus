@@ -18,6 +18,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 import urllib.request
 
 logger = logging.getLogger(__name__)
@@ -441,7 +442,7 @@ _HINT_PROMPT = (
 _LLAMA_BASE = 'http://127.0.0.1:8080'   # the local llama.cpp llama-server
 
 
-def _llama_describe(image_paths, prompt, timeout=300):
+def _llama_describe(image_paths, prompt, timeout=600):
     """Describe a person through the local llama-server (OpenAI-compatible;
     vision via base64 image_url parts — NOT Ollama, per the user's stack).
     ONE call carries up to 3 face frames: qwen3.8-vl reads them together, so
@@ -478,8 +479,17 @@ def _llama_describe(image_paths, prompt, timeout=300):
             msg = (json.load(r).get('choices') or [{}])[0].get('message') or {}
         return (msg.get('content') or msg.get('reasoning_content') or '').strip()
     except Exception as e:                                       # noqa: BLE001
-        logger.warning('refmod: llama describe failed: %s', e)
-        return ''
+        # ONE retry: the common failure is a cold llama-server still loading
+        # qwen3.8 when the first attempt times out — by the retry it is warm.
+        logger.warning('refmod: llama describe failed (%s) — retrying once', e)
+        time.sleep(5)
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                msg = (json.load(r).get('choices') or [{}])[0].get('message') or {}
+            return (msg.get('content') or msg.get('reasoning_content') or '').strip()
+        except Exception as e2:                                  # noqa: BLE001
+            logger.warning('refmod: llama describe retry failed: %s', e2)
+            return ''
 
 
 _META_MARKS = ('格式', '统计', '观察', '方案', '提示词', '不超过', '流程',
