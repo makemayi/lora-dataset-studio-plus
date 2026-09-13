@@ -84,8 +84,9 @@ def main() -> int:
     refs = [str(p) for p in (req.get("refs") or [])]
     images = [str(p) for p in (req.get("images") or [])]
     models_root = req.get("models_root") or None
-    if not refs:
-        print(json.dumps({"ref_ok": False, "results": {}, "error": "missing refs"})); return 1
+    # EMPTY refs is a legitimate request, not a missing argument: the video
+    # bank's person_mode 'person' gates on face PRESENCE/size/pose only, with
+    # no identity to compare against. Detection-only pass: ref_ok True, no sim.
 
     import numpy as np, cv2
     from insightface.app import FaceAnalysis
@@ -196,7 +197,10 @@ def main() -> int:
             _log(f"[face] ref {i}/{len(refs)} unusable: {ref_res.get('state')}")
             continue
         ref_embs.append((r, ref_emb))
-    if not ref_embs:
+    if not ref_embs and refs:
+        # Refusal only when refs were REQUESTED and none survived. Empty refs
+        # is the detection-only pass — the absence of an identity to compare
+        # against is the mode, not a broken reference set.
         print(json.dumps({"ref_ok": False, "results": {}, "refs": ref_report,
                           "error": f"no usable face in any of {len(refs)} reference photo(s)"}))
         return 1
@@ -221,7 +225,7 @@ def main() -> int:
     for i, p in enumerate(images, 1):
         try:
             r = analyze(p); emb = r.pop("_emb", None)
-            if r["state"] in ("scorable", "extreme_pose") and emb is not None:
+            if ref_embs and r["state"] in ("scorable", "extreme_pose") and emb is not None:
                 sims = [float(np.dot(ref_emb, emb)) for _, ref_emb in ref_embs]
                 r["sim"] = round(max(sims), 4)
             results[p] = r

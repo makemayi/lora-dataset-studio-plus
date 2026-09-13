@@ -119,9 +119,14 @@ def score_faces(python_exe, script_path, refs, image_paths, models_root=None,
     None means "the pass did not run", which the selector treats as absent
     evidence rather than as "no face here" — the distinction matters, because a
     missing interpreter would otherwise look exactly like a video with nobody
-    in it.
+    in it. EMPTY ``refs`` is not "did not run": it is the refless
+    detection-only pass (person_mode 'person').
     """
-    if not python_exe or not refs or not image_paths:
+    # refs may legitimately be EMPTY: person_mode 'person' gates on presence
+    # only (the _face_pass_or_raise contract) — the infer script runs a
+    # detection-only pass for it. Only a missing interpreter or no candidates
+    # make the pass unavailable.
+    if not python_exe or not image_paths:
         return None
     payload = json.dumps({'refs': list(refs), 'images': list(image_paths),
                           'models_root': models_root or None})
