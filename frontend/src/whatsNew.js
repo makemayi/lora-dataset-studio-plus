@@ -50,6 +50,15 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-09-12-refmod-prompt-hint',
+    date: '2026-09-12',
+    title: '🏷️ Every RefMod now ships a ready-to-paste identity prompt',
+    blurb: 'Generating a RefMod also reads the best face frame and writes '
+      + 'a one-line prompt hint — subject tag + facial features, hair, '
+      + 'skin tone, face accessories (earrings, glasses), and marks like '
+      + 'moles. Saved as *_prompt_hint.txt next to the mod.'
+  },
+  {
     id: '2026-09-12-refmod-unmasked-default',
     date: '2026-09-12',
     title: '🧩 RefMod default: no face mask (it measured worse)',
