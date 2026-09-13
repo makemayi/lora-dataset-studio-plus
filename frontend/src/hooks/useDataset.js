@@ -784,8 +784,19 @@ export function useDataset() {
         toast.error([d.error, d.detail].filter(Boolean).join(' — ') || 'Unexpected error');
         return;
       }
+      // The hint is the paste-ready identity prompt — straight to the
+      // clipboard so the next step is “paste it next to <Subject 1>”.
+      const hint = d.prompt_hint || '';
+      let copied = false;
+      if (hint) {
+        try {
+          await navigator.clipboard.writeText(hint);
+          copied = true;
+        } catch { /* non-secure context — the txt file next to the mod has it */ }
+      }
       toast.success(`RefMod saved — ${d.tokens} tokens (${d.frames} frames). ` +
-        'Refresh the Load H3 RefMods node to pick it up.');
+        (copied ? 'prompt_hint copied to clipboard.' : hint ? `prompt_hint: ${hint}` : '') +
+        ' Refresh the Load H3 RefMods node to pick it up.');
       return d;
     } finally {
       clearInterval(poll);
