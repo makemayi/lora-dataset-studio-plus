@@ -431,39 +431,45 @@ def _fill_from_pending(ds, by, note):
 
 
 _HINT_PROMPT = (
-    '只根据这张人脸照片，用中文客观描述这个人的稳定身份特征，供绘画提示词使用：'
+    '这些照片是同一个人，综合所有照片，用中文客观描述她的稳定身份特征，供绘画提示词使用：'
     '脸部特征（脸型、眼、鼻、唇）、发型与发色、肤色、明显的脸部特征点（如痣、雀斑、疤痕）、'
-    '以及脸部饰品（是否戴耳环/耳钉/眼镜/墨镜等；没有则写无饰品）。'
-    '不要描述表情、情绪、背景、身体服装和摄影风格；不要评价美丑；用逗号分隔的短语，50字以内。'
+    '以及脸部饰品（是否戴耳环/耳钉/眼镜/墨镜等——任何一张照片里出现就算数；全都没有才写无饰品）。'
+    '不要描述表情、情绪、背景、身体服装和摄影风格；不要评价美丑；最后一行用逗号分隔的短语，50字以内。'
     '/no_think')
 
 
 _LLAMA_BASE = 'http://127.0.0.1:8080'   # the local llama.cpp llama-server
 
 
-def _llama_describe(image_path, prompt, timeout=300):
-    """Describe an image through the local llama-server (OpenAI-compatible;
-    vision via a base64 image_url part — NOT Ollama, per the user's stack).
-    Model auto-picked from /v1/models (the multi-model server rejects an
-    unnamed request); thinking models spend small budgets on
-    reasoning_content, so that field is the fallback. Returns '' on any
-    failure — the hint degrades to its prefix."""
+def _llama_describe(image_paths, prompt, timeout=300):
+    """Describe a person through the local llama-server (OpenAI-compatible;
+    vision via base64 image_url parts — NOT Ollama, per the user's stack).
+    ONE call carries up to 3 face frames: qwen3.8-vl reads them together, so
+    accessories union across frames (a bare-faced frame no longer makes the
+    hint say 无眼镜 when she wears glasses in another). Model auto-picked
+    from /v1/models; thinking models spend small budgets on
+    reasoning_content, so that field is the fallback. Returns '' on failure."""
     import base64
-    with open(image_path, 'rb') as f:
-        b64 = base64.b64encode(f.read()).decode('ascii')
+    b64s = []
+    for p in image_paths[:3]:
+        with open(p, 'rb') as f:
+            b64s.append(base64.b64encode(f.read()).decode('ascii'))
+    if not b64s:
+        return ''
     try:
         with urllib.request.urlopen(f'{_LLAMA_BASE}/v1/models', timeout=10) as r:
             models = json.load(r).get('data') or []
         model = next((m['id'] for m in models if m.get('id')), '')
         if not model:
             return ''
+        parts = [{'type': 'text', 'text': prompt}]
+        for b64 in b64s:
+            parts.append({'type': 'image_url',
+                          'image_url': {'url': f'data:image/png;base64,{b64}'}})
         body = json.dumps({
             'model': model, 'max_tokens': 300, 'temperature': 0.3,
             'stream': False,
-            'messages': [{'role': 'user', 'content': [
-                {'type': 'text', 'text': prompt},
-                {'type': 'image_url',
-                 'image_url': {'url': f'data:image/png;base64,{b64}'}}]}]},
+            'messages': [{'role': 'user', 'content': parts}]},
             ensure_ascii=False).encode('utf-8')
         req = urllib.request.Request(
             f'{_LLAMA_BASE}/v1/chat/completions', data=body,
@@ -482,40 +488,50 @@ _META_CHARS = (':', '：', '(', '（')   # colons/parens = scratchpad, not answe
 
 
 def _clean_hint_desc(desc):
-    """Thinking models dump their scratchpad INTO content (meta lines like
-    '观察：…' / '方案：…' around the real answer). Keep the LAST line that
-    actually looks like the asked-for comma phrases, flatten all whitespace."""
-    lines = [ln.strip() for ln in desc.splitlines() if ln.strip()]
-    best, best_seps = None, -1
-    for ln in reversed(lines):
-        if ((',' in ln or '，' in ln) and len(ln) <= 80
-                and not any(k in ln for k in _META_MARKS)
-                and not any(c in ln for c in _META_CHARS)):
-            # the ANSWER is the densest phrase list; meta lines carry 1-2
-            # separators at most ('需精炼成…，控制在40字内')
-            seps = ln.count('，') + ln.count(',')
-            if seps > best_seps:
-                best, best_seps = ln, seps
-    if best is None:
-        best = re.sub(r'\s+', '', desc)[:60]
-    return best.rstrip('。.,，')
+    """Thinking models dump scratchpad ESSAYS into content — numbered/bulleted
+    lines full of colons (measured on buqing: every line was '1.**分析请求**：…'
+    style, so the old last-line filters skipped everything and the raw
+    flattened dump leaked into the hint). For every line take the text AFTER
+    its LAST colon, strip bullet/number markers and meta-marked segments, then
+    keep the DENSEST comma list (≥2 separators, ≤100 chars) — the answer
+    carries 6+, meta lines 1-2. If nothing qualifies, fall back to the longest
+    colon-free segment instead of the raw flattened dump."""
+    best, best_seps = '', -1
+    fallback = ''
+    for ln in desc.splitlines():
+        seg = ln.strip().split('：')[-1].split(':')[-1]
+        seg = re.sub(r'^[\d\.\*\-\s]+', '', seg).strip()
+        seg = re.sub(r'\s+', '', seg)
+        if not seg or len(seg) > 100:
+            continue
+        if any(k in seg for k in _META_MARKS) or any(c in seg for c in _META_CHARS):
+            if len(seg) > len(fallback):
+                fallback = seg
+            continue
+        seps = seg.count('，') + seg.count(',')
+        if seps >= 2 and seps > best_seps:
+            best, best_seps = seg, seps
+    if best:
+        return best.rstrip('。.,，')
+    return fallback[:80].rstrip('。.,，') or re.sub(r'\s+', '', desc)[:60]
 
 
 def _identity_hint(ds, image_paths, picked, note):
     """Build the prompt_hint: a one-line identity description (facial features,
-    hairstyle, skin tone, marks like moles) prefixed with the subject tag, e.g.
-    ``<Subject 1>是一名名叫Joyce 的中国女性，…``. Best kept FACE frame drives the
-    vision call (Ollama, best-effort); a silent/unavailable model degrades to
-    the bare prefix — a hint that only half-exists still composes a prompt.
-    Returns (hint, note)."""
+    hairstyle, skin tone, marks like moles, accessories) prefixed with the
+    subject tag, e.g. ``<Subject 1>是一名名叫Joyce 的中国女性，…``. Up to 3 kept
+    FACE frames drive ONE vision call (union across frames — see
+    _llama_describe); a silent/unavailable model degrades to the bare prefix —
+    a hint that only half-exists still composes a prompt. Returns
+    (hint, note)."""
     prefix = f'<Subject 1>是一名名叫{ds.name} 的中国女性'
     faces = [p for p, r in zip(image_paths, picked)
              if (r.framing or '') == 'face']
-    target = (faces or image_paths)[:1]
-    if not target:
+    targets = (faces or image_paths)[:3]
+    if not targets:
         return prefix, note
     try:
-        desc = _llama_describe(target[0], _HINT_PROMPT)
+        desc = _llama_describe(targets, _HINT_PROMPT)
     except Exception as e:                                       # noqa: BLE001
         logger.warning('refmod: identity hint unavailable: %s', e)
         desc = ''

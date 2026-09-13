@@ -597,12 +597,20 @@ def test_identity_hint_composes_prefix_and_description(app, tmp_path, monkeypatc
         for name in ('a.png', 'b.png'):
             Image.new('RGB', (32, 32)).save(os.path.join(ddir, name))
             paths.append(os.path.join(ddir, name))
-        picked = [SimpleNamespace(framing='face'), SimpleNamespace(framing='bust')]
+        picked = [SimpleNamespace(framing='face'), SimpleNamespace(framing='face'),
+                  SimpleNamespace(framing='face'), SimpleNamespace(framing='bust')]
 
-        monkeypatch.setattr(svc, '_llama_describe',
-                            lambda p, prompt, timeout=180:
-                            '圆脸，单眼皮，肤色白皙，左眼角有一颗痣')
+        seen_paths = []
+        monkeypatch.setattr(
+            svc, '_llama_describe',
+            lambda paths, prompt, timeout=300:
+                (seen_paths.extend(paths),
+                 '圆脸，单眼皮，肤色白皙，左眼角有一颗痣')[1])
+        monkeypatch.setattr(
+            'app.services.refmod_service.os.path.getsize', lambda p: 1024)
         hint, note = svc._identity_hint(ds, paths, picked, note='')
+        assert seen_paths == paths[:3], \
+            'up to 3 face frames ride into ONE vision call'
         assert note == ''
         assert hint == ('<Subject 1>是一名名叫joyce 的中国女性，'
                         '圆脸，单眼皮，肤色白皙，左眼角有一颗痣。'), hint
