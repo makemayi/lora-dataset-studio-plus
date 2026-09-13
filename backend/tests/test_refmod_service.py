@@ -578,7 +578,9 @@ def test_pick_images_frontal_first_avoids_occluded():
 
 def test_identity_hint_composes_prefix_and_description(app, tmp_path, monkeypatch):
     """prompt_hint = the unified subject prefix + what the vision model saw
-    (features/hairstyle/skin/moles), driven by the best FACE frame."""
+    (features/hairstyle/skin/moles): ONE identity call with up to 3 face
+    frames, then a hair-only fallback call when the answer skipped the hair
+    (发型不能漏)."""
     import os
     from PIL import Image
     from types import SimpleNamespace
@@ -600,20 +602,23 @@ def test_identity_hint_composes_prefix_and_description(app, tmp_path, monkeypatc
         picked = [SimpleNamespace(framing='face'), SimpleNamespace(framing='face'),
                   SimpleNamespace(framing='face'), SimpleNamespace(framing='bust')]
 
-        seen_paths = []
+        calls = []
         monkeypatch.setattr(
             svc, '_llama_describe',
-            lambda paths, prompt, timeout=300:
-                (seen_paths.extend(paths),
-                 '圆脸，单眼皮，肤色白皙，左眼角有一颗痣')[1])
+            lambda paths_, prompt, timeout=300:
+                (calls.append(list(paths_)),
+                 '圆脸，单眼皮，肤色白皙，左眼角有一颗痣' if '身份特征' in prompt
+                 else '黑色长发中分')[1])
         monkeypatch.setattr(
             'app.services.refmod_service.os.path.getsize', lambda p: 1024)
         hint, note = svc._identity_hint(ds, paths, picked, note='')
-        assert seen_paths == paths[:3], \
-            'up to 3 face frames ride into ONE vision call'
+        assert calls == [paths[:3], paths[:1]], \
+            'one identity call with up to 3 face frames, then one hair-only call'
         assert note == ''
-        assert hint == ('<Subject 1>是一名名叫joyce 的中国女性，'
-                        '圆脸，单眼皮，肤色白皙，左眼角有一颗痣。'), hint
+        # 发型不能漏: the identity answer carried no hair — the fallback asked
+        # for it alone and appended it.
+        assert hint == ('<Subject 1>是一名名叫joyce 的中国女性，圆脸，单眼皮，'
+                        '肤色白皙，左眼角有一颗痣，黑色长发中分。'), hint
         assert '脸' not in note and 'hint' not in note
 
         # vision silent → degrade to the bare prefix, never fail the run

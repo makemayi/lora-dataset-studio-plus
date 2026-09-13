@@ -432,11 +432,14 @@ def _fill_from_pending(ds, by, note):
 
 
 _HINT_PROMPT = (
-    '这些照片是同一个人，综合所有照片，用中文客观描述她的稳定身份特征，供绘画提示词使用：'
-    '脸部特征（脸型、眼、鼻、唇）、发型与发色、肤色、明显的脸部特征点（如痣、雀斑、疤痕）、'
-    '以及脸部饰品（是否戴耳环/耳钉/眼镜/墨镜等——任何一张照片里出现就算数；全都没有才写无饰品）。'
-    '不要描述表情、情绪、背景、身体服装和摄影风格；不要评价美丑；最后一行用逗号分隔的短语，50字以内。'
-    '/no_think')
+    '这些照片是同一个人，综合所有照片，用中文客观描述她的稳定身份特征，供绘画提示词使用。'
+    '必须逐项包含，一项都不能省：①脸型 ②眼（单双眼皮、眼色）③眉 ④鼻、唇 ⑤发型与发色 '
+    '⑥肤色 ⑦脸部特征点（痣、雀斑、疤痕；没有就写无明显）⑧脸部饰品（耳环/耳钉、眼镜/墨镜——'
+    '任何一张照片里出现就算数；全都没有写无饰品）。'
+    '不要描述表情、情绪、背景、身体服装和摄影风格；不要评价美丑。'
+    '最后一行用逗号分隔的短语，50字以内，八项都必须体现。/no_think')
+_HAIR_PROMPT = ('只描述这个人的发型和发色，一个逗号短语，15字以内，'
+                '例如：黑色长发中分。不要提其他内容。/no_think')
 
 
 _LLAMA_BASE = 'http://127.0.0.1:8080'   # the local llama.cpp llama-server
@@ -548,7 +551,14 @@ def _identity_hint(ds, image_paths, picked, note):
     if not desc:
         note += '; identity hint unavailable (vision model silent) — prefix only'
         return prefix, note
-    return f'{prefix}，{_clean_hint_desc(desc)}。', note
+    clean = _clean_hint_desc(desc)
+    # 发型不能漏 (user rule): if the answer skipped the hair, ask for it alone
+    if not any(k in clean for k in ('发', '刘海')):
+        hair = _llama_describe(targets[:1], _HAIR_PROMPT, timeout=180)
+        hair = re.sub(r'\s+', '', (hair or '').strip('。.,，'))
+        if hair and not any(c in hair for c in _META_CHARS):
+            clean = f'{clean}，{hair}'
+    return f'{prefix}，{clean}。', note
 
 
 def generate_for_dataset(ds, masked=False) -> dict:
