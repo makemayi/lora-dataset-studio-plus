@@ -89,7 +89,7 @@ def main() -> None:
         import torch
 
         from common import load_image_file, resize_ref as _resize_ref, ensure_min_size
-        from core import H3RefMod, fit_token_budget
+        from core import H3RefMod, fit_token_budget, pool_latent, optimize_latent, aspect_grid
 
         import comfy.model_management
         import comfy.sd
@@ -125,6 +125,15 @@ def main() -> None:
         vae.throw_exception_if_invalid()
 
         resolution = 1024
+        # POOLED mode (2026-09-13): each frame's full latent is average-pooled
+        # to a pool×pool latent grid (+ optional gradient refinement toward the
+        # full encode). Cuts the reference tokens the DiT attends per block by
+        # ~4x (20 frames: 20480 → ~5-8k), which is the workflow speed the user
+        # was losing; identity stays because refine pulls the pooled latent
+        # back toward the full encode (pack default pool 32 = its identity
+        # floor — below that pooling averages away the face).
+        pool = int(manifest.get('pool') or 32)
+        refine = int(manifest.get('refine') or 300)
         max_tokens = int(manifest.get('max_tokens') or 8192)
         masks = manifest.get('masks') or []
         background_retention = float(manifest.get('background_retention') or 0.0)
@@ -145,7 +154,7 @@ def main() -> None:
             src = ensure_min_size(_resize_ref(load_image_file(path, max_edge=resolution * 2),
                                               resolution, canvas))
             with torch.no_grad():
-                z = vae.encode(src.to(device)).float().cpu()
+                z = vae.encode(src.to(device)).float()
             mask_path = masks[i] if i < len(masks) else None
             if mask_path and os.path.isfile(mask_path) and _pack_mask_latent is not None:
                 # Suppress everything outside the face toward a blurred copy of
@@ -157,7 +166,13 @@ def main() -> None:
             elif mask_path:
                 print(f"[extract] note: no mask support — {os.path.basename(path)} "
                       f"encoded unmasked")
-            frames.append(z.to(torch.float16))
+            if pool >= 16:
+                gh, gw = aspect_grid(pool, pool, src.shape[1] / src.shape[2])
+                zp = pool_latent(z, 1, gh, gw)
+                if refine > 0:
+                    zp = optimize_latent(zp, z, steps=refine, device=device)
+                z = zp
+            frames.append(z.float().cpu().to(torch.float16))
             shapes.append(f"{z.shape[2]}x{z.shape[3]}x{z.shape[4]}")
 
         latent = torch.cat(frames, dim=2)
@@ -167,9 +182,11 @@ def main() -> None:
         mod = H3RefMod(
             name=name, kind="video" if total_t > 1 else "image", latent=latent,
             latent_h=latent.shape[3], latent_w=latent.shape[4], latent_t=total_t,
-            mode="encode", source="stack" if len(frames) > 1 else "image",
+            mode="training" if pool >= 16 else "encode",
+            source="stack" if len(frames) > 1 else "image",
             source_shape=" +".join(shapes),
-            pool=f"full-res {px_w}x{px_h}px (short-edge cap {resolution}px)",
+            pool=(f"pooled {pool}x{pool} refine {refine}" if pool >= 16 else
+                  f"full-res {px_w}x{px_h}px (short-edge cap {resolution}px)"),
             optimize_steps=0, tags=[f"{len(frames)} img"],
             description=description, concept_type="identity",
         )

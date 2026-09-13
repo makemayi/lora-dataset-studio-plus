@@ -26,30 +26,29 @@ def test_pick_images_identity_first():
     from app.services import refmod_service as svc
 
     # 30 faces available: face-dominant, bust secondary, fulls carry the
-    # figure/clothing — 4 of them ride along whenever the dataset has them.
+    # figure/clothing — 2 of them ride along; 2026-09-13 配额 4/2/4/2 = 12。
     rows = ([_img(i, 'keep', 'face') for i in range(30)]
             + [_img(100 + i, 'keep', 'bust') for i in range(8)]
             + [_img(200 + i, 'keep', 'full') for i in range(5)]
             + [_img(300, 'pending', 'face'), _img(301, 'reject', 'half')])
     picked = svc.pick_images(rows)
-    assert len(picked) == 20          # 12 face + 4 bust + 4 full
-    assert sum(r.framing == 'face' for r in picked) == 12
+    assert len(picked) == 12          # 6 face (4 正脸 + 2 侧脸) + 4 bust + 2 full
+    assert sum(r.framing == 'face' for r in picked) == 6
     assert sum(r.framing == 'bust' for r in picked) == 4
-    assert sum(r.framing == 'full' for r in picked) == 4,         'the figure/clothing rides to the mod — fulls are always taken'
+    assert sum(r.framing == 'full' for r in picked) == 2,         'the figure/clothing rides to the mod — fulls are always taken'
     assert all(r.status == 'keep' for r in picked)
 
 
-def test_pick_images_fulls_up_to_four_even_when_thin():
+def test_pick_images_fulls_up_to_two_even_when_thin():
     from app.services import refmod_service as svc
 
-    # 4 face + 1 bust + 9 fulls: 4 fulls ride along (body/clothing coverage);
-    # the set is 9 — above the old 6-row floor, so no extra top-up happens.
+    # 4 face + 1 bust + 9 fulls: 全身配额 2 — body/clothing coverage 固定带 2 张。
     rows = ([_img(i, 'keep', 'face') for i in range(4)]
             + [_img(50, 'keep', 'bust')]
             + [_img(100 + i, 'keep', 'full') for i in range(9)])
     picked = svc.pick_images(rows)
-    assert len(picked) == 9
-    assert sum(r.framing == 'full' for r in picked) == 4
+    assert len(picked) == 7
+    assert sum(r.framing == 'full' for r in picked) == 2
 
 
 
@@ -274,7 +273,7 @@ def test_route_refmod_happy_path(app, client, monkeypatch):
                         lambda user, ds_id: SimpleNamespace(id=ds_id, name='x',
                                                             images=rows))
     monkeypatch.setattr(routes.refmod_service, 'generate_for_dataset',
-                        lambda ds, masked=True: {'name': 'n', 'tokens': 10, 'frames': 2,
+                        lambda ds, masked=True, pool=32: {'name': 'n', 'tokens': 10, 'frames': 2,
                                                  'path': 'p', 'mb': 0.2, 'masked': 1})
     resp = client.post('/api/dataset/5/refmod')
     assert resp.status_code == 200
@@ -324,7 +323,7 @@ def test_route_refmod_404_and_no_kept(app, client, monkeypatch):
     monkeypatch.setattr(routes.svc, 'get_dataset', lambda user, ds_id: None)
     assert client.post('/api/dataset/5/refmod').status_code == 404
 
-    def no_images(ds, masked=True):
+    def no_images(ds, masked=True, pool=32):
         raise ValueError('No kept images to encode.')
 
     monkeypatch.setattr(routes.svc, 'get_dataset',
@@ -339,7 +338,7 @@ def test_route_refmod_gpu_busy_maps_to_503(app, client, monkeypatch):
     from app.routes import datasets as routes
     from app.gpu_window import GpuBusyError
 
-    def fake_generate(ds, masked=True):
+    def fake_generate(ds, masked=True, pool=32):
         raise GpuBusyError('a vision task is already running')
 
     monkeypatch.setattr(routes.svc, 'get_dataset',
@@ -521,12 +520,12 @@ def test_fill_from_pending_promotes_best_per_category(app, tmp_path):
             rows_all.append(r)
             return r
 
-        # kept: 1 face, 1 bust, 0 full → deficits 11 / 3 / 4
+        # kept: 1 face, 1 bust, 0 full → deficits 5 / 3 / 2（新配额 6/4/2）
         row('keep', 'face', 0.9)
         row('keep', 'bust', 0.8)
-        # 12 pending faces (score 0.8): 10 sharp + 2 blurred — 11 slots, and
+        # 8 pending faces (score 0.8): 6 sharp + 2 blurred — 5 slots, and
         # sharpness is the tie-break that leaves a blurred one out.
-        faces = [row('pending', 'face', 0.8, blur=(i >= 10)) for i in range(12)]
+        faces = [row('pending', 'face', 0.8, blur=(i >= 6)) for i in range(8)]
         busts = [row('pending', 'bust', 0.6) for _ in range(3)]
         bodies = [row('pending', 'body', 0.5 + i / 10) for i in range(6)]
         row('pending', 'back', 0.99)                     # wrong category
@@ -543,15 +542,15 @@ def test_fill_from_pending_promotes_best_per_category(app, tmp_path):
               'full': []}
 
         count, note = svc._fill_from_pending(ds, by, note='')
-        assert count == 11 + 3 + 4, note
-        assert len(by['face']) == 12 and len(by['half']) == 4
-        assert len(by['full']) == 4
+        assert count == 5 + 3 + 2, note
+        assert len(by['face']) == 6 and len(by['half']) == 4
+        assert len(by['full']) == 2
         promoted_ids = {r.id for r in by['face'][1:]}
-        assert all(f.id in promoted_ids for f in faces[:10]), 'sharp faces fill first'
-        assert faces[11].id not in promoted_ids,             'sharpness breaks the tie — the least sharp face fills last'
+        assert all(f.id in promoted_ids for f in faces[:5]), 'sharp faces fill first'
+        assert all(f.id not in promoted_ids for f in faces[5:]),             'sharpness breaks the tie — the least sharp faces fill last'
         assert fileless.status == 'pending', 'file-less rows are skipped'
         assert all(r.status == 'keep' for r in by['full']),             'promoted fulls are SAVED (kept), not just borrowed'
-        assert [r.id for r in by['full']] == [r.id for r in list(reversed(bodies))[:4]],             'higher-similarity fulls fill first'
+        assert [r.id for r in by['full']] == [r.id for r in list(reversed(bodies))[:2]],             'higher-similarity fulls fill first'
         assert 'promoted from the triage pile' in note
 
 
@@ -572,7 +571,8 @@ def test_pick_images_frontal_first_avoids_occluded():
         _img(6, 'keep', 'face', face_score=None, face_yaw=8),            # frontal, unscored
     ]
     faces = [r.id for r in svc.pick_images(rows) if r.framing == 'face']
-    assert faces == [2, 6, 1, 3, 4], faces
+    # id2(3°) → id6(8° 正脸但未评分) → id3(10° low_det 垫底) → 侧脸组 id1(45°)、id4(60° 弱)
+    assert faces == [2, 6, 3, 1, 4], faces
     assert 5 not in faces, 'a no_face row is not a face reference'
 
 

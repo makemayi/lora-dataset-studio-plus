@@ -1440,7 +1440,8 @@ def dataset_refmod(dataset_id):
         vision_keepalive.revoke('refmod extraction')   # same gate as training
         with gpu_exclusive_vision_window(flag_ttl=600):
             res = refmod_service.generate_for_dataset(
-                ds, masked=bool(data.get('mask', False)))
+                ds, masked=bool(data.get('mask', False)),
+                pool=int(data.get('pool', 32)))
     except Exception as e:
         return _map_error(e)
     return jsonify({'ok': True, **res})

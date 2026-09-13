@@ -32,8 +32,11 @@ from ..services.dataset_storage import dataset_path
 # Per-framing picks, identity-first: the face signal lives in close-ups and
 # half/full frames are what carry CLOTHING into the latent (the #1 complaint).
 # Ladder face → half → full tops up only when a dataset lacks close-ups.
-_MAX_FACE, _MAX_HALF, _MAX_FULL = 12, 4, 4
-_TOKEN_BUDGET = 20480   # 20 frames x <=1024 tokens at a 1024px-long-side encode
+_MAX_FRONT, _MAX_PROFILE = 4, 2      # 正脸 4 + 侧脸 2（|yaw|≤30° 为正脸）
+_MAX_FACE = _MAX_FRONT + _MAX_PROFILE
+_MAX_HALF, _MAX_FULL = 4, 2
+_MAX_TOTAL = 12
+_TOKEN_BUDGET = 3200   # 12 frames x 256 tokens (pool 32, 长边 1024)
 _BACKGROUND_RETENTION = 0.0   # outside the face mask collapses to a blurred copy
 _MASKS_DIR_NAME = 'refmod'
 _SUBPROCESS_TIMEOUT_S = 1800
@@ -97,30 +100,48 @@ _BAD_FACE_STATES = ('no_face', 'too_small', 'unreadable', 'error')
 _WEAK_FACE_STATES = ('low_det', 'extreme_pose')
 
 
-def _face_order(rows, limit):
-    """正脸优先，侧脸为辅，避开遮挡: usable faces only (no_face/too_small/
-    unreadable/error are not face references), ordered frontal-first (|yaw|),
-    profiles and unmeasured rows after, and low_det (occluded/unclear) or
-    extreme_pose demoted to the tail — still eligible when a dataset has
-    nothing better."""
+_FRONTAL_YAW = 30.0   # |yaw| 在此之内视为正脸；之外是侧脸（YAW_MAX=70）
+
+
+def _face_pick(rows):
+    """正脸 4 + 侧脸 2（2026-09-13 用户配额）。可用脸（排除坏状态）先按
+    |yaw|≤30° 分正脸组、之外为侧脸组（未评分的排正脸组尾部——姿态未知，
+    当备补），组内弱状态（low_det/extreme_pose=遮挡/极端）垫底、相似度 DESC；
+    正脸取满 4，侧脸补 2，不足 6 张时正脸余量 → 侧脸余量 → 未评分依次回填。"""
     usable = [r for r in rows
               if (r.face_state or 'scorable') not in _BAD_FACE_STATES]
-    return sorted(usable, key=lambda r: (
-        (r.face_state or '') in _WEAK_FACE_STATES,
-        abs(r.face_yaw) if r.face_yaw is not None else 90.0,
-        -(r.face_score or 0), r.id))[:limit]
+
+    def key(r):
+        return ((r.face_state or '') in _WEAK_FACE_STATES,
+                -(r.face_score or 0), r.id)
+
+    front, prof, unk = [], [], []
+    for r in usable:
+        if r.face_yaw is None:
+            unk.append(r)
+        elif abs(r.face_yaw) <= _FRONTAL_YAW:
+            front.append(r)
+        else:
+            prof.append(r)
+    # 组内各自排序：弱状态垫底、相似度 DESC——未评分的留在 unk 组尾部，
+    # 不会按分数插进已评分的正脸前面。
+    front.sort(key=key)
+    prof.sort(key=key)
+    unk.sort(key=key)
+    picked = front[:_MAX_FRONT] + prof[:_MAX_PROFILE]
+    if len(picked) < _MAX_FACE:
+        rest = [r for grp in (front, prof, unk)
+                for r in grp if r not in picked]
+        picked += rest[:_MAX_FACE - len(picked)]
+    return picked
 
 
 def pick_images(images) -> list:
-    """Identity-first pick, ≤20 rows: up to 12 face close-ups — 正脸优先，
-    侧脸为辅，避开遮挡 (frontal |yaw| first, profiles after, low_det/
-    extreme_pose demoted, dead face states excluded) — then 4 half shots and
-    4 full frames: the figure and clothing ride to the mod too, so fulls are
-    ALWAYS taken when the dataset has them (they are not a thin-set fallback
-    any more; a thin set is whatever it is — every kept row is already in).
-    House framing mapping (Bank build's): face→face, bust→half, body→full; a
-    back view is not an identity reference and is never picked. Inside a
-    bucket, scored rows lead (face_score DESC)."""
+    """Identity-first pick, ≤12 rows (2026-09-13 用户配额): 4 正脸（含未评分
+    回填）+ 2 侧脸 + 4 半身 + 2 全身 — 身材与服装随身份一起进 mod。正脸优先
+    侧脸为辅，避开遮挡；house framing mapping (Bank build's): face→face,
+    bust→half, body→full; a back view is never picked. Inside a bucket,
+    scored rows lead (face_score DESC)."""
     by: dict[str, list] = {'face': [], 'half': [], 'full': []}
     for row in images:
         if getattr(row, 'status', None) != 'keep' or not getattr(row, 'filename', None):
@@ -131,13 +152,13 @@ def pick_images(images) -> list:
         by[{'face': 'face', 'bust': 'half'}.get(fr, 'full')].append(row)
     for bucket in by.values():
         bucket.sort(key=lambda r: (r.face_score is None, -(r.face_score or 0), r.id))
-    picked = (_face_order(by['face'], _MAX_FACE)
+    picked = (_face_pick(by['face'])
               + by['half'][:_MAX_HALF] + by['full'][:_MAX_FULL])
     if not (by['face'] or by['half']):
         # A dataset with only full frames has no closer option — clothing is
         # unavoidable there, so at least keep 12 angles for coverage.
-        picked = by['full'][:12]
-    return picked[:_MAX_FACE + _MAX_HALF + _MAX_FULL]
+        picked = by['full'][:_MAX_TOTAL]
+    return picked[:_MAX_TOTAL]
 
 
 
@@ -561,7 +582,7 @@ def _identity_hint(ds, image_paths, picked, note):
     return f'{prefix}，{clean}。', note
 
 
-def generate_for_dataset(ds, masked=False) -> dict:
+def generate_for_dataset(ds, masked=False, pool=32) -> dict:
     """Encode ds's kept images into one RefMod. Synchronous (~1-3 min: the VAE
     load dominates); the caller holds the GPU vision window.
 
@@ -571,12 +592,12 @@ def generate_for_dataset(ds, masked=False) -> dict:
     names the output with a ``_mask`` suffix, kept for A/B comparison."""
     set_refmod_stage(ds.id, 'picking images')
     try:
-        return _generate_for_dataset(ds, masked)
+        return _generate_for_dataset(ds, masked, pool)
     finally:
         set_refmod_stage(ds.id, None)
 
 
-def _generate_for_dataset(ds, masked=False) -> dict:
+def _generate_for_dataset(ds, masked=False, pool=32) -> dict:
     root = _comfy_root()
     python_exe = _python_exe(root)
     node_dir = _node_dir(root)
@@ -619,6 +640,10 @@ def _generate_for_dataset(ds, masked=False) -> dict:
         'output_dir': str(root / 'models' / 'refmods'),
         'description': f'identity baseline from LDS dataset {ds.id} ({ds.name})',
         'max_tokens': _TOKEN_BUDGET,
+        # POOLED reference: 池化到 32x32 latent 网格 + 300 步梯度精修，
+        # 参考 token 从 ~20480 降到 ~5120（生成提速 ~4x 的注意力开销）。
+        # body={'pool': 0} 可回到全分辨率编码模式。
+        'pool': int(pool),
         'masks': masks,
         'background_retention': _BACKGROUND_RETENTION,
     }
