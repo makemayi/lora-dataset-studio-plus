@@ -397,8 +397,11 @@ def _extract_job(bank_id, dataset_id, user_id, clip_ids, *, frames_per_clip,
             report[clip.id] = {'picked': len(frames_out),
                                'rejected': dict(got.get('rejected') or {})}
 
+            _HOUSE = {'full': 'body', 'half': 'bust', 'face': 'face'}
             import_images(user_id, dataset_id,
                           [g['bytes'] for g in frames_out],
+                          framings=[_HOUSE.get(g['provenance'].get('framing'))
+                                    for g in frames_out],
                           source_metadata=[g['provenance'] for g in frames_out])
             written += len(frames_out)
             bank_jobs.progress(job, done=done, total=len(clip_ids),

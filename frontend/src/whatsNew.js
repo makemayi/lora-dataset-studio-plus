@@ -50,6 +50,15 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-09-13-video-promote-framing',
+    date: '2026-09-13',
+    title: '🏷️ Video-bank frame promotions now carry their framing',
+    blurb: 'Frames promoted from a video bank into an image dataset used to '
+      + 'land without a composition label, so the 全身 filter came up empty. '
+      + 'They now import as 全身 (or the crop you asked for) and show up in '
+      + 'every framing filter.'
+  },
+  {
     id: '2026-09-12-refmod-prompt-hint',
     date: '2026-09-12',
     title: '🏷️ Every RefMod now ships a ready-to-paste identity prompt',
