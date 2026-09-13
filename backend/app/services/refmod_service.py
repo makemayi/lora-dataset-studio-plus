@@ -560,6 +560,20 @@ _META_MARKS = ('格式', '统计', '观察', '方案', '提示词', '不超过',
                '综合所有照片', '可以描述为', '需要包含', '身份特征')
 _META_CHARS = (':', '：', '(', '（')   # colons/parens = scratchpad, not answer
 
+_REASONING_MARKS = ('我们', '用户', '需要', '也许', '可以', '可写', '可能',
+                    '应该', '改写', '只保留', '分析', '观察', '综合', '如果',
+                    '假设', '似乎', '补全', '缺失', '但')
+
+
+def _scrub_reasoning(clean):
+    """按句切分（。；），丢弃带推理/元语气的句子——思考模型的草稿会连着
+    答案一起吐；全被丢弃时返回原串，由调用方决定降级。"""
+    if not clean:
+        return clean
+    parts = [p.strip('。 ，,') for p in re.split('[。；;]', clean)]
+    keep = [p for p in parts if p and not any(m in p for m in _REASONING_MARKS)]
+    return '，'.join(keep) if keep else (parts and parts[0]) or clean
+
 
 def _clean_hint_desc(desc):
     """Thinking models dump scratchpad ESSAYS into content — numbered/bulleted
@@ -618,7 +632,10 @@ def _identity_hint(ds, image_paths, picked, note):
         return prefix, note
     # 思考模型会把草稿连着答案一起吐出来——用一次纯文本改写调用把它压成
     # 规范单行，比逐个 dump 打补丁可靠（rewrite 失败则退回原始描述）。
-    clean = _clean_hint_desc(_llama_text(_HINT_REWRITE + '\n\n' + raw) or raw)
+    clean = _scrub_reasoning(_clean_hint_desc(_llama_text(_HINT_REWRITE + '\n\n' + raw) or raw))
+    if not clean:
+        note += '; identity hint unavailable (vision model silent) — prefix only'
+        return prefix, note
     # 发型不能漏 (user rule): if the answer skipped the hair, ask for it alone
     if not any(k in clean for k in ('发', '刘海')):
         hair = _llama_describe(targets[:1], _HAIR_PROMPT, timeout=180)
