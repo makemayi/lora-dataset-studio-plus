@@ -494,6 +494,8 @@ def _extract_phrases(text):
             continue          # 带冒号/括号/引号的是散文或回显
         if not any(a in chunk for a in _ATTR_WORDS):
             continue
+        if chunk[-1] in '较很偏略比和与的':
+            continue          # 截断片段（'下巴较'）——事实短语不会以程度副词收尾
         if chunk not in seen:
             seen.add(chunk)
             out.append(chunk)
@@ -603,6 +605,7 @@ _REASONING_MARKS = ('我们', '用户', '需要', '也许', '可以', '可写', 
                     '包含', '属于', '显示')
 
 _ECHO_ITEMS = ('脸型', '眼', '眉', '鼻', '唇', '鼻唇', '肤色', '发型与发色', '发型发色',
+               '脸部特征', '面部特征',
                '脸部特征点', '脸部饰品', '痣', '雀斑', '疤痕', '眼镜/墨镜',
                '耳环/耳钉', '眼镜', '墨镜', '耳环', '耳钉', '无明显', '无饰品')
 
