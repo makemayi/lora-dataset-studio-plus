@@ -467,6 +467,32 @@ _HAIR_PROMPT = ('只描述这个人的发型和发色，一个逗号短语，15�
 
 
 _LLAMA_BASE = 'http://127.0.0.1:8080'   # the local llama.cpp llama-server
+_ATTR_WORDS = ('脸', '面', '眼', '眉', '鼻', '唇', '嘴', '肤', '发', '刘海',
+               '痣', '疤', '雀斑', '眼镜', '墨镜', '耳钉', '耳环', '耳饰',
+               '下巴', '颧骨', '下颌', '瞳', '睫毛')
+
+
+def _extract_phrases(text):
+    """白名单抽短语：把文本切成小块，只保留含属性关键词且不含推理标记的短语。
+    比“按句丢弃”健壮：合法事实句常带“可以/缺失”这类词，整句丢弃会把事实一起
+    丢掉（实测 joyce/茜茜 只剩发型）。"""
+    if not text:
+        return []
+    out, seen = [], set()
+    for chunk in re.split(r'[。；;，,、\n]', text):
+        chunk = chunk.strip(' 　"“”')
+        if not chunk or len(chunk) > 30:
+            continue
+        if any(m in chunk for m in _REASONING_MARKS):
+            continue
+        if not any(a in chunk for a in _ATTR_WORDS):
+            continue
+        if chunk not in seen:
+            seen.add(chunk)
+            out.append(chunk)
+    return out
+
+
 _HINT_REWRITE = ('把下面的照片特征描述改写成一行中文逗号分隔短语，只保留：脸型、眼、'
                  '眉、鼻唇、发型与发色、肤色、脸部特征点（痣等）、脸部饰品（眼镜/耳饰）。'
                  '删除表情、光线、背景、对要求本身的复述等一切其它内容。直接输出短语行。')
@@ -558,58 +584,12 @@ def _llama_describe(image_paths, prompt, timeout=600):
             return ''
 
 
-_META_MARKS = ('格式', '统计', '观察', '方案', '提示词', '不超过', '流程',
-               '草稿', '字数', '逗号分隔', '八项', '最后一行', '必须体现',
-               '综合所有照片', '可以描述为', '需要包含', '身份特征')
 _META_CHARS = (':', '：', '(', '（')   # colons/parens = scratchpad, not answer
 
 _REASONING_MARKS = ('我们', '用户', '需要', '也许', '可以', '可写', '可能',
                     '应该', '改写', '只保留', '分析', '观察', '综合', '如果',
                     '假设', '似乎', '补全', '缺失', '未给', '把下面的照片特征描述',
                     '但', '没有信息', '最好', '？', '?', '“', '”')
-
-
-def _scrub_reasoning(clean):
-    """按句切分（。；），丢弃带推理/元语气的句子——思考模型的草稿会连着
-    答案一起吐；全被丢弃时返回原串，由调用方决定降级。"""
-    if not clean:
-        return clean
-    parts = [p.strip('。 ，,') for p in re.split('[。；;]', clean)]
-    keep = [p for p in parts if p and not any(m in p for m in _REASONING_MARKS)]
-    return '，'.join(keep) if keep else (parts and parts[0]) or clean
-
-
-def _clean_hint_desc(desc):
-    """Thinking models dump scratchpad ESSAYS into content — numbered/bulleted
-    lines full of colons (measured on buqing: every line was '1.**分析请求**：…'
-    style, so the old last-line filters skipped everything and the raw
-    flattened dump leaked into the hint). For every line take the text AFTER
-    its LAST colon, strip bullet/number markers and meta-marked segments, then
-    keep the DENSEST comma list (≥2 separators, ≤100 chars) — the answer
-    carries 6+, meta lines 1-2. If nothing qualifies, fall back to the longest
-    colon-free segment instead of the raw flattened dump."""
-    lines = [ln.strip() for ln in desc.splitlines() if ln.strip()]
-    # 从后往前：答案总在推理之后；第一个 ≥2 逗号、无元标记的行即答案。
-    # 元标记过滤器拦住提示词回显（'最后一行用逗号分隔的短语…'这类）。
-    for ln in reversed(lines):
-        seg = ln.split('：')[-1].split(':')[-1]
-        seg = re.sub(r'^[\d\.\*\-\s]+', '', seg).strip()
-        seg = re.sub(r'\s+', '', seg)
-        if not seg or len(seg) > 100:
-            continue
-        if any(k in seg for k in _META_MARKS) or any(c in seg for c in _META_CHARS):
-            continue
-        if seg.count('，') + seg.count(',') >= 2:
-            return seg.rstrip('。.,，')
-    fallback = ''
-    for ln in lines:
-        seg = re.sub(r'\s+', '', ln.split('：')[-1].split(':')[-1])
-        if (seg and len(seg) <= 100
-                and not any(k in seg for k in _META_MARKS)
-                and not any(c in seg for c in _META_CHARS)
-                and len(seg) > len(fallback)):
-            fallback = seg
-    return fallback[:80].rstrip('。.,，') or re.sub(r'\s+', '', desc)[:60]
 
 
 def _identity_hint(ds, image_paths, picked, note):
@@ -634,10 +614,13 @@ def _identity_hint(ds, image_paths, picked, note):
     if not raw:
         note += '; identity hint unavailable (vision model silent) — prefix only'
         return prefix, note
-    # 行级预洗：推理/回现行直接从改写输入中剔除，再交给改写
-    raw_text = '\n'.join(ln for ln in raw.splitlines()
-                         if not any(m in ln for m in _REASONING_MARKS)) or raw
-    clean = _scrub_reasoning(_clean_hint_desc(_llama_text(_HINT_REWRITE + '\n\n' + raw_text) or raw_text))
+    # 白名单抽短语优先从视觉原文取（事实最全）；短语太少才走一次改写补充。
+    phrases = _extract_phrases(raw)
+    if len(phrases) < 4:
+        for p in _extract_phrases(_llama_text(_HINT_REWRITE + '\n\n' + raw)):
+            if p not in phrases:
+                phrases.append(p)
+    clean = '，'.join(phrases)
     if not clean:
         note += '; identity hint unavailable (vision model silent) — prefix only'
         return prefix, note
