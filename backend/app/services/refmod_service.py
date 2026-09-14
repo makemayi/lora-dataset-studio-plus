@@ -530,6 +530,8 @@ def _llama_text(prompt, timeout=300):
         body = json.dumps({
             'model': model, 'max_tokens': 300, 'temperature': 0.2,
             'stream': False,
+            'reasoning_effort': 'none',
+            'chat_template_kwargs': {'enable_thinking': False},
             'messages': [{'role': 'user', 'content': prompt}]},
             ensure_ascii=False).encode('utf-8')
         req = urllib.request.Request(
@@ -582,6 +584,10 @@ def _llama_describe(image_paths, prompt, timeout=600):
         body = json.dumps({
             'model': model, 'max_tokens': 300, 'temperature': 0.3,
             'stream': False,
+            # 关思考（实测：reasoning 0 字，3s 出干净答案）：思考模型会把
+            # 草稿和要求回显一起吐进 content，是 hint 污染的唯一根源。
+            'reasoning_effort': 'none',
+            'chat_template_kwargs': {'enable_thinking': False},
             'messages': [{'role': 'user', 'content': parts}]},
             ensure_ascii=False).encode('utf-8')
         req = urllib.request.Request(
