@@ -36,7 +36,7 @@ _MAX_FRONT, _MAX_PROFILE = 4, 2      # 正脸 4 + 侧脸 2（|yaw|≤30° 为正
 _MAX_FACE = _MAX_FRONT + _MAX_PROFILE
 _MAX_HALF, _MAX_FULL = 4, 2
 _MAX_TOTAL = 12
-_TOKEN_BUDGET = 7200   # 12 frames x <=576 tokens (pool 48, 长边 1024)
+_TOKEN_BUDGET = 13000   # 12 frames x <=1024 tokens (pool 64 = full latent, 长边 1024)
 _BACKGROUND_RETENTION = 0.0   # outside the face mask collapses to a blurred copy
 _MASKS_DIR_NAME = 'refmod'
 _SUBPROCESS_TIMEOUT_S = 1800
@@ -103,6 +103,11 @@ _WEAK_FACE_STATES = ('low_det', 'extreme_pose')
 _FRONTAL_YAW = 30.0   # |yaw| 在此之内视为正脸；之外是侧脸（YAW_MAX=70）
 
 
+def _abs_row_path(row):
+    from pathlib import Path as _P
+    return str(_P(dataset_path(row.dataset_id)) / row.filename)
+
+
 def _face_pick(rows):
     """正脸 4 + 侧脸 2（2026-09-13 用户配额）。可用脸（排除坏状态）先按
     |yaw|≤30° 分正脸组、之外为侧脸组（未评分的排正脸组尾部——姿态未知，
@@ -111,9 +116,19 @@ def _face_pick(rows):
     usable = [r for r in rows
               if (r.face_state or 'scorable') not in _BAD_FACE_STATES]
 
+    def area_of(r):
+        """脸图自身的像素数——没有相似度分数时的质量代理（脸越大＝身份信息
+        越多）。取不到文件（测试桩）按 0 处理。"""
+        try:
+            from PIL import Image
+            with Image.open(_abs_row_path(r)) as im:
+                return im.width * im.height
+        except Exception:                                        # noqa: BLE001
+            return 0
+
     def key(r):
         return ((r.face_state or '') in _WEAK_FACE_STATES,
-                -(r.face_score or 0), r.id)
+                -(r.face_score or 0), -area_of(r), r.id)
 
     front, prof, unk = [], [], []
     for r in usable:
@@ -678,7 +693,7 @@ def _identity_hint(ds, image_paths, picked, note):
     return f'{prefix}，{clean}。', note
 
 
-def generate_for_dataset(ds, masked=False, pool=48) -> dict:
+def generate_for_dataset(ds, masked=False, pool=64) -> dict:
     """Encode ds's kept images into one RefMod. Synchronous (~1-3 min: the VAE
     load dominates); the caller holds the GPU vision window.
 
@@ -693,7 +708,7 @@ def generate_for_dataset(ds, masked=False, pool=48) -> dict:
         set_refmod_stage(ds.id, None)
 
 
-def _generate_for_dataset(ds, masked=False, pool=48) -> dict:
+def _generate_for_dataset(ds, masked=False, pool=64) -> dict:
     root = _comfy_root()
     python_exe = _python_exe(root)
     node_dir = _node_dir(root)

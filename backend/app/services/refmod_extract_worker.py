@@ -132,7 +132,7 @@ def main() -> None:
         # was losing; identity stays because refine pulls the pooled latent
         # back toward the full encode (pack default pool 32 = its identity
         # floor — below that pooling averages away the face).
-        pool = int(manifest.get('pool') or 48)
+        pool = int(manifest.get('pool') or 64)
         refine = int(manifest.get('refine') or 1500)
         max_tokens = int(manifest.get('max_tokens') or 8192)
         masks = manifest.get('masks') or []
