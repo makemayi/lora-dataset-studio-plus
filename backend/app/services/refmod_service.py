@@ -36,7 +36,7 @@ _MAX_FRONT, _MAX_PROFILE = 4, 2      # 正脸 4 + 侧脸 2（|yaw|≤30° 为正
 _MAX_FACE = _MAX_FRONT + _MAX_PROFILE
 _MAX_HALF, _MAX_FULL = 4, 2
 _MAX_TOTAL = 12
-_TOKEN_BUDGET = 3200   # 12 frames x 256 tokens (pool 32, 长边 1024)
+_TOKEN_BUDGET = 7200   # 12 frames x <=576 tokens (pool 48, 长边 1024)
 _BACKGROUND_RETENTION = 0.0   # outside the face mask collapses to a blurred copy
 _MASKS_DIR_NAME = 'refmod'
 _SUBPROCESS_TIMEOUT_S = 1800
@@ -286,10 +286,13 @@ def _harvest_face_crops(ds, sources, deficit, note):
                 bw, bh = (x2 - x1) * w, (y2 - y1) * h
                 if max(bw, bh) < _CROP_MIN_FACE_PX:
                     continue
-                # 方向外扩：头发在上、下巴在下都不能切。脸占裁片 ~25%，
-                # 「≥50%」规则只用于判定原图是否直接入选，裁片以完整头部为先。
+                # 方向外扩：头发在上、下巴在下都不能切，但**头部占比必须 ≥70%**
+                # （用户要求 2026-09-13）：旧的 0.45/0.75/0.35 外扩把裁片放到
+                # 1.9bw × 2.1bh，脸只占 ~50%，Topaz/编码后人脸像素被稀释 →
+                # 生图脸部发虚。0.20/0.25/0.15 给 1.4bw × 1.4bh，脸本身占 ~71%，
+                # 头部（含头发）更高；「≥50%」规则仍只用于判定原图直接入选。
                 cx = (x1 + x2) * w / 2
-                mx, top, bot = 0.45 * bw, 0.75 * bh, 0.35 * bh
+                mx, top, bot = 0.20 * bw, 0.25 * bh, 0.15 * bh
                 l = max(0, int(cx - bw / 2 - mx))
                 r_ = min(w, int(cx + bw / 2 + mx))
                 t = max(0, int(y1 * h - top))
@@ -562,7 +565,7 @@ _META_CHARS = (':', '：', '(', '（')   # colons/parens = scratchpad, not answe
 
 _REASONING_MARKS = ('我们', '用户', '需要', '也许', '可以', '可写', '可能',
                     '应该', '改写', '只保留', '分析', '观察', '综合', '如果',
-                    '假设', '似乎', '补全', '缺失', '但')
+                    '假设', '似乎', '补全', '缺失', '未给', '把下面的照片特征描述', '但')
 
 
 def _scrub_reasoning(clean):
@@ -630,9 +633,10 @@ def _identity_hint(ds, image_paths, picked, note):
     if not raw:
         note += '; identity hint unavailable (vision model silent) — prefix only'
         return prefix, note
-    # 思考模型会把草稿连着答案一起吐出来——用一次纯文本改写调用把它压成
-    # 规范单行，比逐个 dump 打补丁可靠（rewrite 失败则退回原始描述）。
-    clean = _scrub_reasoning(_clean_hint_desc(_llama_text(_HINT_REWRITE + '\n\n' + raw) or raw))
+    # 行级预洗：推理/回现行直接从改写输入中剔除，再交给改写
+    raw_text = '\n'.join(ln for ln in raw.splitlines()
+                         if not any(m in ln for m in _REASONING_MARKS)) or raw
+    clean = _scrub_reasoning(_clean_hint_desc(_llama_text(_HINT_REWRITE + '\n\n' + raw_text) or raw_text))
     if not clean:
         note += '; identity hint unavailable (vision model silent) — prefix only'
         return prefix, note
@@ -645,7 +649,7 @@ def _identity_hint(ds, image_paths, picked, note):
     return f'{prefix}，{clean}。', note
 
 
-def generate_for_dataset(ds, masked=False, pool=32) -> dict:
+def generate_for_dataset(ds, masked=False, pool=48) -> dict:
     """Encode ds's kept images into one RefMod. Synchronous (~1-3 min: the VAE
     load dominates); the caller holds the GPU vision window.
 
@@ -660,7 +664,7 @@ def generate_for_dataset(ds, masked=False, pool=32) -> dict:
         set_refmod_stage(ds.id, None)
 
 
-def _generate_for_dataset(ds, masked=False, pool=32) -> dict:
+def _generate_for_dataset(ds, masked=False, pool=48) -> dict:
     root = _comfy_root()
     python_exe = _python_exe(root)
     node_dir = _node_dir(root)
@@ -707,6 +711,9 @@ def _generate_for_dataset(ds, masked=False, pool=32) -> dict:
         # 参考 token 从 ~20480 降到 ~5120（生成提速 ~4x 的注意力开销）。
         # body={'pool': 0} 可回到全分辨率编码模式。
         'pool': int(pool),
+        # 1500 步精修：只在建 Mod 时耗时，生成端零成本——把 48x48 latent
+        # 尽量贴近全分辨率编码，恢复一致性与脸部细节。
+        'refine': 1500,
         'masks': masks,
         'background_retention': _BACKGROUND_RETENTION,
     }

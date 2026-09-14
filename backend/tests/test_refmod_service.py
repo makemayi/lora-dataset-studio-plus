@@ -609,6 +609,10 @@ def test_identity_hint_composes_prefix_and_description(app, tmp_path, monkeypatc
                 (calls.append(list(paths_)),
                  ('圆脸，单眼皮，肤色白皙，左眼角有一颗痣，黑色长发中分'
                   if '身份特征' in prompt else '黑色长发中分'))[1])
+        # The REWRITE call is a separate seam (_llama_text) — stub it too, or
+        # the test hits the live llama-server (measured: it rephrased the stub
+        # text into '黑色中分长发' and broke the assertion).
+        monkeypatch.setattr(svc, '_llama_text', lambda prompt, timeout=300: '')
         monkeypatch.setattr(
             'app.services.refmod_service.os.path.getsize', lambda p: 1024)
         hint, note = svc._identity_hint(ds, paths, picked, note='')
