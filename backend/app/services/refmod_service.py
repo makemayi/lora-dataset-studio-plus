@@ -483,8 +483,12 @@ def _extract_phrases(text):
         chunk = chunk.strip(' 　"“”')
         if not chunk or len(chunk) > 30:
             continue
+        if chunk in _ECHO_ITEMS:
+            continue          # 提示词自己的条目名，不是事实
         if any(m in chunk for m in _REASONING_MARKS):
             continue
+        if any(c in chunk for c in _META_CHARS):
+            continue          # 带冒号/括号/引号的是散文或回显
         if not any(a in chunk for a in _ATTR_WORDS):
             continue
         if chunk not in seen:
@@ -589,7 +593,13 @@ _META_CHARS = (':', '：', '(', '（')   # colons/parens = scratchpad, not answe
 _REASONING_MARKS = ('我们', '用户', '需要', '也许', '可以', '可写', '可能',
                     '应该', '改写', '只保留', '分析', '观察', '综合', '如果',
                     '假设', '似乎', '补全', '缺失', '未给', '把下面的照片特征描述',
-                    '但', '没有信息', '最好', '？', '?', '“', '”')
+                    '但', '没有信息', '最好', '？', '?', '“', '”',
+                    '必须包含', '必须体现', '8项', '八项', '①', '②', '③', '④',
+                    '⑤', '⑥', '⑦', '⑧', '没有就写', '任何一张')
+
+_ECHO_ITEMS = ('脸型', '眼', '眉', '鼻', '唇', '肤色', '发型与发色', '发型发色',
+               '脸部特征点', '脸部饰品', '痣', '雀斑', '疤痕', '眼镜/墨镜',
+               '耳环/耳钉', '眼镜', '墨镜', '耳环', '耳钉', '无明显', '无饰品')
 
 
 def _identity_hint(ds, image_paths, picked, note):
@@ -614,10 +624,13 @@ def _identity_hint(ds, image_paths, picked, note):
     if not raw:
         note += '; identity hint unavailable (vision model silent) — prefix only'
         return prefix, note
-    # 白名单抽短语优先从视觉原文取（事实最全）；短语太少才走一次改写补充。
-    phrases = _extract_phrases(raw)
+    # 改写输出为主（改写提示词明确要求删除复述/推理），视觉原文只在改写
+    # 短语不足时补充——实测模型会把八项要求原文回显，回显行里也带属性词，
+    # 靠白名单拦不住，必须先过改写这一道。
+    rewritten = _llama_text(_HINT_REWRITE + '\n\n' + raw)
+    phrases = _extract_phrases(rewritten)
     if len(phrases) < 4:
-        for p in _extract_phrases(_llama_text(_HINT_REWRITE + '\n\n' + raw)):
+        for p in _extract_phrases(raw):
             if p not in phrases:
                 phrases.append(p)
     clean = '，'.join(phrases)
