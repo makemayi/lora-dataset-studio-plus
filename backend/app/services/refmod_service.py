@@ -481,6 +481,9 @@ def _extract_phrases(text):
     out, seen = [], set()
     for chunk in re.split(r'[。；;，,、\n]', text):
         chunk = chunk.strip(' 　"“”')
+        # 剥掉编号/项目符号/箭头再比对——实测模型回显带 '1.  脸型'、'3.  眉'、
+        # '-> *圆润鹅蛋脸*' 这类前缀，不剥就绕过了 _ECHO_ITEMS。
+        chunk = re.sub(r'^[\d\.\*\->\s、]+', '', chunk).strip(' 　*')
         if not chunk or len(chunk) > 30:
             continue
         if chunk in _ECHO_ITEMS:
@@ -588,7 +591,7 @@ def _llama_describe(image_paths, prompt, timeout=600):
             return ''
 
 
-_META_CHARS = (':', '：', '(', '（')   # colons/parens = scratchpad, not answer
+_META_CHARS = (':', '：', '(', '（', ')', '）')   # 冒号/括号 = 草稿或回显，不是事实
 
 _REASONING_MARKS = ('我们', '用户', '需要', '也许', '可以', '可写', '可能',
                     '应该', '改写', '只保留', '分析', '观察', '综合', '如果',
@@ -596,7 +599,8 @@ _REASONING_MARKS = ('我们', '用户', '需要', '也许', '可以', '可写', 
                     '但', '没有信息', '最好', '？', '?', '“', '”',
                     '必须包含', '必须体现', '8项', '八项', '①', '②', '③', '④',
                     '⑤', '⑥', '⑦', '⑧', '没有就写', '任何一张',
-                    '没有', '缺少', '下面', '只到', '只有思考', '...', '…')
+                    '没有', '缺少', '下面', '只到', '只有思考', '...', '…',
+                    '包含', '属于', '显示')
 
 _ECHO_ITEMS = ('脸型', '眼', '眉', '鼻', '唇', '鼻唇', '肤色', '发型与发色', '发型发色',
                '脸部特征点', '脸部饰品', '痣', '雀斑', '疤痕', '眼镜/墨镜',
@@ -634,7 +638,14 @@ def _identity_hint(ds, image_paths, picked, note):
         for p in _extract_phrases(raw):
             if p not in phrases:
                 phrases.append(p)
-    clean = '，'.join(phrases)
+    # 总长封顶（用户要 ~50 字）：按顺序塞，超了就停
+    kept, total = [], 0
+    for p in phrases:
+        if total + len(p) + 1 > 70:
+            break
+        kept.append(p)
+        total += len(p) + 1
+    clean = '，'.join(kept)
     if not clean:
         note += '; identity hint unavailable (vision model silent) — prefix only'
         return prefix, note
