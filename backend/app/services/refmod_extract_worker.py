@@ -169,7 +169,9 @@ def main() -> None:
             if pool >= 16:
                 gh, gw = aspect_grid(pool, pool, src.shape[1] / src.shape[2])
                 zp = pool_latent(z, 1, gh, gw)
-                if refine > 0:
+                # pool 64 = 全分辨率：pool_latent 原样返回（早退），此时 zp is z，
+                # 再跑 1500 步精修就是拿 latent 优化它自己——纯浪费，跳过。
+                if refine > 0 and zp is not z:
                     zp = optimize_latent(zp, z, steps=refine, device=device)
                 z = zp
             frames.append(z.float().cpu().to(torch.float16))
