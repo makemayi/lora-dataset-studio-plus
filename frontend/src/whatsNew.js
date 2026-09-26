@@ -50,6 +50,19 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-09-26-qwen21-settings-card',
+    date: '2026-09-26',
+    title: '🎛 Qwen 2.1 gets its Settings card — every dial and pin in one place',
+    blurb: 'The fourth local engine was config-file-only: the likeness/speed '
+      + 'resolution dial, sampler steps, negative prompt, size cap, model pins '
+      + 'and LoRA presets now have a real card in Settings → Image engines → '
+      + 'Qwen 2.1, each with reset-to-default and the file picker listing what '
+      + 'the resolver would actually elect. Bonus fix: a default LoRA preset is '
+      + 'now truly applied to every Qwen 2.1 run — before, presets could be '
+      + 'configured but nothing ever loaded them.',
+    to: '/settings/engines?focus=qwen21-ref-resolution',
+  },
+  {
     id: '2026-09-26-llamacpp-vision-engine',
     date: '2026-09-26',
     title: '🦙 Second vision engine: llama.cpp — every vision pass can now run on llama-server',

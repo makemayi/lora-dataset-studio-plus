@@ -54,6 +54,12 @@ SLOTS = {
     'krea_identity_lora': ('loras', 'ComfyUI’s models/loras'),
     # Special-cased below — the folder type is right, the LIST is the resolver's.
     'krea_base_model': ('diffusion_models', 'a krea-named folder under ComfyUI’s models/unet'),
+    # Special-cased below, same reason as krea_base_model: the 2.1 resolver only
+    # elects 2.1-tokened safetensors out of the qwen folders, so the plain folder
+    # listing would offer files the graph refuses (Qwen-Image 1/Layered builds).
+    'qwen21_model': ('diffusion_models', 'a qwen-named folder under ComfyUI’s models/unet'),
+    'qwen21_text_encoder': ('text_encoders', 'ComfyUI’s models/text_encoders'),
+    'qwen21_vae': ('vae', 'ComfyUI’s models/vae'),
 }
 
 _lock = threading.Lock()
@@ -90,6 +96,9 @@ def _scan(slot: str, folder_type: str) -> list[str]:
     if slot == 'krea_base_model':
         from . import krea_edit_helper as krh
         return _folded(krh._krea_unet_folders())
+    if slot == 'qwen21_model':
+        from . import qwen21_edit_helper as q21
+        return _folded(q21._qwen21_unet_candidates())
     if slot == 'klein_unet':
         from . import klein_edit_helper as kh
         return _folded(kh._klein_unet_folders())

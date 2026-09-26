@@ -255,6 +255,18 @@ def test_generation_lora_preset_is_fail_closed(q21):
     assert rows == [{'file': 'skin.safetensors', 'strength': 0.7}]
 
 
+def test_a_blank_run_preset_falls_back_to_the_settings_default(q21):
+    """The workspace per-run preset picker does not exist for this engine yet:
+    every real run calls this lane with generation_lora_preset=None, so without
+    the fallback the whole presets config was inert — configurable, never
+    applied. Source-pinned like the job-stamp test above: the seam lives in a
+    module this file does not import."""
+    import inspect
+    from app.services import dataset_generation_service as dsvc
+    src = inspect.getsource(dsvc.generate_variations_qwen21)
+    assert "generation_lora_preset or cfg.get('qwen21.default_generation_lora_preset')" in src
+
+
 def test_engine_is_registered_everywhere_it_must_be(q21):
     """One registration point per concern, and no third copy: the catalog, the
     LOCAL lane tuple and the label map all know the id."""

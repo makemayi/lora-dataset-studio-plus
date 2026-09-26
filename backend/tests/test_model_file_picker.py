@@ -152,6 +152,27 @@ def test_the_klein_unet_list_is_the_RESOLVER_s_candidates_too(app, comfy):
     assert hint
 
 
+def test_the_qwen21_base_list_is_the_RESOLVER_s_candidates_too(app, comfy):
+    """Same discipline as krea_base_model: the list is the resolver's own
+    candidate walk — qwen-folder safetensors minus the Layered architecture and
+    minus GGUF builds the stock UNETLoader cannot open. A generation-1 file
+    stays listable ON PURPOSE: a pin resolves by basename across these same
+    candidates, so offering it is what a pin can actually do (the DEFAULT
+    election is the one that narrows to 2.1 tokens)."""
+    d = comfy / 'models' / 'diffusion_models' / 'qwen'
+    _write(d / 'qwen_image_2.1_bf16.safetensors')
+    _write(d / 'qwen_image_bf16.safetensors')            # generation 1: pinnable
+    _write(d / 'qwen_image_2.1_layered.safetensors')     # Layered: different latent class
+    _write(d / 'qwen_image_2.1_ggufQ4K_M.gguf')          # GGUF: different loader
+    with app.app_context():
+        files, hint = picker.list_slot_files('qwen21_model')
+    assert any('qwen_image_2.1_bf16' in f for f in files)
+    assert any('qwen_image_bf16' in f for f in files)
+    assert not any('layered' in f or f.endswith('.gguf') for f in files), (
+        'the picker offered a build no loader in this graph can open')
+    assert hint
+
+
 def test_both_unet_pickers_agree_with_what_capabilities_publishes(app, comfy):
     """The two ends, side by side, on one tree. This is the assertion that would
     have caught the divergence at the commit that introduced it: what Settings

@@ -302,7 +302,11 @@ def generate_variations_qwen21(user_id, dataset_id, variations, multiplier,
     if not ds.ref_filename:
         raise ValueError('reference image required')
     qeh.preflight()
-    run_loras = qeh.resolve_generation_lora_preset(generation_lora_preset)
+    # Blank run arg → the Settings default preset. The workspace per-run picker
+    # does not exist for this engine yet, so without this fallback the whole
+    # presets config was inert: configurable, never applied.
+    run_loras = qeh.resolve_generation_lora_preset(
+        generation_lora_preset or cfg.get('qwen21.default_generation_lora_preset'))
     mult = max(1, int(multiplier))
     total = len(variations) * mult
     if total > MAX_FANOUT:

@@ -2114,6 +2114,415 @@ function KreaLorasCard({ config, setField }) {
   )
 }
 
+/* Qwen-Image 2.1 — the FOURTH local engine. Its one creative dial is
+   `ref_resolution`, THE likeness <-> speed trade: every reference is resized
+   into this square pixel budget, which is also the output size. Capped by
+   `max_output_mp` server-side (the dial cannot quietly exceed the VRAM
+   contract); cfg 4.0 and the sampler are pinned in code like Krea's cfg 1.0.
+   The three pins are BLANK-MEANS-AUTO like every local engine's model fields:
+   the resolver narrow-token-matches across every ComfyUI root, so an install
+   with a non-standard layout works untouched. The resolved base is named
+   server-side (caps.qwen21.base_resolved) — the browser ranks nothing. */
+const QWEN21_REF_RESOLUTIONS = [512, 640, 768, 896, 1024, 1280, 1536, 1792, 2048]
+const QWEN21_STEPS_MIN = 4            // qwen21_edit_helper._steps clamp
+const QWEN21_STEPS_MAX = 60
+const QWEN21_MAX_OUTPUT_MP_MAX = 16   // _max_output_resolution clamp
+const QWEN21_CHARACTER_LORA_SLOTS = 5 // qwen21_edit_helper.CHARACTER_LORA_SLOTS
+const QWEN21_CHARACTER_LORA_DEFAULT = 0.8  // helper _character_loras default
+
+function Qwen21Card({ config, setField, configDefaults, caps }) {
+  const q = config.qwen21 || {}
+  const reset = { config, configDefaults, setField }
+  const dflt = (key) => defaultValueAt(configDefaults, 'qwen21', key)
+  // One scan per slot, fired when the card mounts; both degrade to free text.
+  const modelScan = useModelFiles('qwen21_model')
+  const teScan = useModelFiles('qwen21_text_encoder')
+  const vaeScan = useModelFiles('qwen21_vae')
+  // Which pins the server says are NOT on disk (slot names from
+  // qwen21_edit_helper.qwen21_pin_gaps). A missing pin is a hard stop, so the
+  // badge is the honest red one, never a silent fallback.
+  const gapSlots = new Set((caps?.qwen21?.pin_gaps || []).map((g) => g.slot))
+  const resolved = caps?.qwen21?.base_resolved || ''
+  const refRes = Number(q.ref_resolution ?? dflt('ref_resolution'))
+  const ladder = QWEN21_REF_RESOLUTIONS.includes(refRes)
+    ? QWEN21_REF_RESOLUTIONS : [...QWEN21_REF_RESOLUTIONS, refRes].sort((a, b) => a - b)
+  const pinBadge = (slot, value) => {
+    if (!String(value || '').trim()) return null
+    if (gapSlots.has(slot)) {
+      return { cls: 'text-amber-400', text: 'Not found — the engine refuses to run until you fix or clear this' }
+    }
+    return { cls: 'text-emerald-400', text: 'Found' }
+  }
+  const rows = Array.isArray(q.character_loras) ? q.character_loras : []
+  const padded = Array.from({ length: QWEN21_CHARACTER_LORA_SLOTS }, (_, i) => ({
+    file: rows[i]?.file ?? '',
+    strength: Number.isFinite(Number(rows[i]?.strength))
+      ? Number(rows[i].strength) : QWEN21_CHARACTER_LORA_DEFAULT,
+  }))
+  const setRow = (i, patch) => {
+    const next = padded.map((r, j) => (j === i ? { ...r, ...patch } : r))
+    setField('qwen21', 'character_loras', next)
+  }
+  return (
+    <Card
+      id="qwen21-engine-settings"
+      title="Qwen 2.1 (local)"
+      help="The fourth local engine. Qwen-Image 2.1 is an instruction-edit model whose identity comes from the reference photo itself — no character LoRA, no node pack (the edit node ships in ComfyUI's core). It needs three files: a 2.1 base, the full Qwen3-VL 8B text encoder and the 2.1 VAE — all found by searching your ComfyUI model roots, so blank pins are usually right. cfg 4.0 and the sampler are pinned in code, like Krea's cfg 1.0."
+    >
+      <div className="sm:max-w-md">
+        <label htmlFor="qwen21-ref-resolution" className="block text-xs font-medium text-content">
+          Reference resolution ({refRes} px)
+        </label>
+        <select
+          id="qwen21-ref-resolution"
+          value={String(refRes)}
+          onChange={(e) => setField('qwen21', 'ref_resolution', Number(e.target.value))}
+          className={INPUT_CLASS}
+        >
+          {ladder.map((v) => <option key={v} value={String(v)}>{v} px</option>)}
+        </select>
+        <HelpText className="mt-1 text-xs text-content-muted">
+          THE likeness dial: every reference is resized into this square budget,
+          which is also the output size (aspect preserved). Lower is faster with a
+          softer likeness; higher holds identity harder and costs VRAM. The
+          megapixel cap below wins over this dial — a resolution whose square
+          exceeds it is brought down to the cap, not silently oversized.
+        </HelpText>
+        <ResetToDefault label="Reference resolution" section="qwen21" field="ref_resolution" {...reset} />
+      </div>
+
+      <div className="mt-3 sm:max-w-xs">
+        <label htmlFor="qwen21-steps" className="block text-xs font-medium text-content">
+          Sampler steps
+        </label>
+        <input
+          id="qwen21-steps"
+          type="number"
+          min={QWEN21_STEPS_MIN}
+          max={QWEN21_STEPS_MAX}
+          step={1}
+          value={q.steps ?? dflt('steps')}
+          onChange={(e) => setField('qwen21', 'steps',
+            e.target.value === '' ? dflt('steps') : Number(e.target.value))}
+          className={INPUT_CLASS}
+        />
+        <HelpText className="mt-1 text-xs text-content-muted">
+          {dflt('steps')} = the measured working profile (euler/simple at cfg 4.0,
+          both pinned in code). {QWEN21_STEPS_MIN}–{QWEN21_STEPS_MAX}; more steps = slower,
+          usually cleaner.
+        </HelpText>
+        <ResetToDefault label="Sampler steps" section="qwen21" field="steps" {...reset} />
+      </div>
+
+      <div className="mt-3 sm:max-w-xs">
+        <label htmlFor="qwen21-max-output-mp" className="block text-xs font-medium text-content">
+          Output size cap (megapixels)
+        </label>
+        <input
+          id="qwen21-max-output-mp"
+          type="number"
+          min={0.1}
+          max={QWEN21_MAX_OUTPUT_MP_MAX}
+          step={0.5}
+          value={q.max_output_mp ?? dflt('max_output_mp')}
+          onChange={(e) => setField('qwen21', 'max_output_mp',
+            e.target.value === '' ? dflt('max_output_mp') : Number(e.target.value))}
+          className={INPUT_CLASS}
+        />
+        <HelpText className="mt-1 text-xs text-content-muted">
+          The ceiling the resolution dial can never push past — the VRAM contract
+          for this engine. Default {String(dflt('max_output_mp'))} MP ≈ a 1408 px square.
+        </HelpText>
+        <ResetToDefault label="Output size cap" section="qwen21" field="max_output_mp" {...reset} />
+      </div>
+
+      <div className="mt-3">
+        <label htmlFor="qwen21-negative-prompt" className="block text-xs font-medium text-content">
+          Negative prompt (optional)
+        </label>
+        <textarea
+          id="qwen21-negative-prompt"
+          rows={3}
+          value={q.negative_prompt ?? ''}
+          placeholder="Blank = none — the model rarely needs one at cfg 4.0"
+          onChange={(e) => setField('qwen21', 'negative_prompt', e.target.value)}
+          className={`${INPUT_CLASS} mt-1 w-full resize-y`}
+        />
+        <HelpText className="mt-1 text-xs text-content-muted">
+          Applied to every run of this engine, dataset images and reference edits alike.
+        </HelpText>
+        <ResetToDefault label="Negative prompt" section="qwen21" field="negative_prompt" {...reset} />
+      </div>
+
+      <div className="mt-3 sm:max-w-md">
+        <div className="flex flex-wrap items-center justify-between gap-x-2">
+          <label htmlFor="qwen21-model" className="block text-xs font-medium text-content">
+            Base model file (optional)
+          </label>
+          {pinBadge('base_model', q.base_model) && (
+            <span className={`text-xs ${pinBadge('base_model', q.base_model).cls}`}>
+              {pinBadge('base_model', q.base_model).text}
+            </span>
+          )}
+        </div>
+        <ModelFilePicker
+          id="qwen21-model"
+          ariaLabel="Qwen 2.1 base model file"
+          value={q.base_model ?? ''}
+          onChange={(v) => setField('qwen21', 'base_model', v)}
+          placeholder="auto — finds a Qwen-Image 2.1 build"
+          {...modelScan}
+        />
+        {resolved && (
+          <p className="mt-1 font-mono text-[0.6875rem] text-content-muted">Elected: {resolved}</p>
+        )}
+        <HelpText className="mt-1 text-xs text-content-muted">
+          Leave blank unless you own several 2.1 builds. The list is what the app
+          would actually elect from: qwen-folder safetensors, minus the Layered
+          architecture and minus GGUF builds (the stock loader cannot open them).
+          The Qwen-Image 1 base stays pinnable but decodes 2.1 references wrong —
+          the default election never picks it.
+        </HelpText>
+        <ResetToDefault label="Base model file" section="qwen21" field="base_model" {...reset} />
+      </div>
+
+      <div className="mt-3 sm:max-w-md">
+        <div className="flex flex-wrap items-center justify-between gap-x-2">
+          <label htmlFor="qwen21-text-encoder" className="block text-xs font-medium text-content">
+            Text encoder file (optional)
+          </label>
+          {pinBadge('text_encoder', q.text_encoder) && (
+            <span className={`text-xs ${pinBadge('text_encoder', q.text_encoder).cls}`}>
+              {pinBadge('text_encoder', q.text_encoder).text}
+            </span>
+          )}
+        </div>
+        <ModelFilePicker
+          id="qwen21-text-encoder"
+          ariaLabel="Qwen 2.1 text encoder file"
+          value={q.text_encoder ?? ''}
+          onChange={(v) => setField('qwen21', 'text_encoder', v)}
+          placeholder="auto — finds a Qwen3-VL 8B encoder"
+          {...teScan}
+        />
+        <HelpText className="mt-1 text-xs text-content-muted">
+          2.1 uses the FULL 8B encoder. The 4B one Krea uses produces the wrong
+          clip target and the 32B one is MiniMax H3's — the auto-match accepts
+          only 8B names, and a hand pin is used exactly as typed.
+        </HelpText>
+        <ResetToDefault label="Text encoder file" section="qwen21" field="text_encoder" {...reset} />
+      </div>
+
+      <div className="mt-3 sm:max-w-md">
+        <div className="flex flex-wrap items-center justify-between gap-x-2">
+          <label htmlFor="qwen21-vae" className="block text-xs font-medium text-content">
+            VAE file (optional)
+          </label>
+          {pinBadge('vae', q.vae) && (
+            <span className={`text-xs ${pinBadge('vae', q.vae).cls}`}>
+              {pinBadge('vae', q.vae).text}
+            </span>
+          )}
+        </div>
+        <ModelFilePicker
+          id="qwen21-vae"
+          ariaLabel="Qwen 2.1 VAE file"
+          value={q.vae ?? ''}
+          onChange={(v) => setField('qwen21', 'vae', v)}
+          placeholder="auto — finds the Qwen Image 2.1 VAE"
+          {...vaeScan}
+        />
+        <HelpText className="mt-1 text-xs text-content-muted">
+          The Qwen-Image 1 VAE carries a different latent format and decodes 2.1
+          latents as noise, so it is never a fallback — the auto-match accepts
+          only 2.1-named files.
+        </HelpText>
+        <ResetToDefault label="VAE file" section="qwen21" field="vae" {...reset} />
+      </div>
+
+      <div id="qwen21-character-loras" className="mt-3 border-t border-border pt-3">
+        <span className="block text-xs font-medium text-content">
+          Character LoRAs (optional, up to {QWEN21_CHARACTER_LORA_SLOTS})
+        </span>
+        <HelpText className="mt-1 mb-2 text-xs text-content-muted">
+          Your own trained character/person LoRAs, chained IN ORDER after the base
+          for extra likeness on top of the native reference transfer. Each path is
+          relative to ComfyUI's models/loras; a blank row is simply skipped, so
+          leaving every row blank is a complete no-op. There is no auto-detection:
+          each names one specific file you trained.
+        </HelpText>
+        {padded.map((row, i) => (
+          <div key={i} className="mt-2 flex items-center gap-2 flex-wrap">
+            <span className="text-xs text-content-muted w-4 shrink-0" aria-hidden="true">{i + 1}.</span>
+            <input
+              type="text"
+              aria-label={`Qwen 2.1 character LoRA ${i + 1} file`}
+              value={row.file}
+              placeholder="e.g. mychar/my_character_v1.safetensors"
+              onChange={(e) => setRow(i, { file: e.target.value })}
+              className={`${INPUT_CLASS} mt-0 flex-1 min-w-[16rem]`}
+            />
+            <label className="flex items-center gap-1.5 text-xs text-content-muted">
+              <span className="whitespace-nowrap">{row.strength.toFixed(2)}</span>
+              <input
+                type="range" min={0} max={1.5} step={0.05} value={row.strength}
+                aria-label={`Qwen 2.1 character LoRA ${i + 1} strength`}
+                onChange={(e) => setRow(i, { strength: Number(e.target.value) })}
+                className="w-28 accent-teal-500"
+              />
+            </label>
+          </div>
+        ))}
+      </div>
+    </Card>
+  )
+}
+
+/* The preset rows are PLAIN TEXT, not the Klein combobox: the /api/loras/list
+   badges judge families this engine has no entry for yet (no qwen21 training
+   lane exists), so an architecture badge here would be a made-up guarantee —
+   the same reason the Krea character-LoRA rows are plain text. */
+function Qwen21PresetRows({ preset, index, presets, save }) {
+  const rows = Array.isArray(preset?.loras) ? preset.loras : []
+  const patchPreset = (p) => save(presets.map((x, j) => (j === index ? { ...x, ...p } : x)))
+  const patchRow = (i, p) => patchPreset({ loras: rows.map((r, j) => (j === i ? { ...r, ...p } : r)) })
+  const moveRow = (i, dir) => {
+    const j = i + dir
+    if (j < 0 || j >= rows.length) return
+    const next = [...rows]
+    ;[next[i], next[j]] = [next[j], next[i]]
+    patchPreset({ loras: next })
+  }
+  return (
+    <div className="rounded-lg border border-border p-3 space-y-2">
+      <div className="flex items-center gap-2">
+        <input
+          type="text" aria-label={`Preset ${index + 1} name`}
+          value={preset?.name || ''}
+          onChange={(e) => patchPreset({ name: e.target.value })}
+          placeholder="Preset name"
+          className={`${INPUT_CLASS} mt-0 font-medium`}
+        />
+        <button type="button" className={TEXT_BTN}
+          disabled={presets.length >= MAX_GENERATION_LORA_PRESETS}
+          onClick={() => save([...presets,
+            { ...preset, name: freeName(presets, `${(preset?.name || 'Preset').trim() || 'Preset'} (copy)`), loras: rows.map((r) => ({ ...r })) }])}
+          title="Duplicate this preset">
+          Duplicate
+        </button>
+        <button type="button" className={`${TEXT_BTN} hover:bg-red-50 hover:text-red-600`}
+          onClick={() => save(presets.filter((_, j) => j !== index))}
+          title="Delete this preset">
+          Delete
+        </button>
+      </div>
+      {rows.length === 0 && (
+        <HelpText className="text-xs text-content-muted">Empty preset — add a LoRA below.</HelpText>
+      )}
+      {rows.map((row, i) => {
+        const range = kreaStrengthRange(row?.file || '')
+        const strength = Number.isFinite(Number(row?.strength)) ? Number(row.strength) : KREA_LORA_STRENGTH_DEFAULT
+        return (
+          <div key={i} className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs text-content-muted w-4 shrink-0" aria-hidden="true">{i + 1}.</span>
+            <input
+              type="text"
+              aria-label={`Preset ${index + 1} LoRA file ${i + 1}`}
+              value={row?.file || ''}
+              onChange={(next) => patchRow(i, { file: next.target.value })}
+              placeholder="qwen/my-lora.safetensors"
+              className={`${INPUT_CLASS} mt-0 flex-1 min-w-[14rem]`}
+            />
+            <label className="flex items-center gap-1.5 text-xs text-content-muted">
+              <span className="whitespace-nowrap">{strength.toFixed(2)}</span>
+              <input
+                type="range" min={range.min} max={range.max} step={0.05} value={strength}
+                aria-label={`Preset ${index + 1} LoRA ${i + 1} strength`}
+                onChange={(e) => patchRow(i, { strength: Number(e.target.value) })}
+                className="w-28 accent-teal-500"
+              />
+            </label>
+            <button type="button" onClick={() => moveRow(i, -1)} disabled={i === 0}
+              aria-label={`Move LoRA ${i + 1} up in preset ${index + 1}`} title="Chain earlier" className={SMALL_BTN}>↑</button>
+            <button type="button" onClick={() => moveRow(i, 1)} disabled={i === rows.length - 1}
+              aria-label={`Move LoRA ${i + 1} down in preset ${index + 1}`} title="Chain later" className={SMALL_BTN}>↓</button>
+            <button type="button" onClick={() => patchPreset({ loras: rows.filter((_, j) => j !== i) })}
+              aria-label="Remove this LoRA" title="Remove this LoRA"
+              className={`${SMALL_BTN} hover:bg-red-50 hover:text-red-600`}>✕</button>
+          </div>
+        )
+      })}
+      <div className="flex items-center gap-3">
+        <button
+          type="button" className={TEXT_BTN}
+          onClick={() => patchPreset({ loras: [...rows, { file: '', strength: KREA_LORA_STRENGTH_DEFAULT }] })}
+          disabled={rows.length >= MAX_GENERATION_LORAS}
+        >
+          ＋ Add LoRA
+        </button>
+        <span className="text-xs text-content-muted">{rows.length}/{MAX_GENERATION_LORAS} in the chain</span>
+      </div>
+    </div>
+  )
+}
+
+function Qwen21LorasCard({ config, setField }) {
+  const presets = Array.isArray(config.qwen21?.generation_lora_presets)
+    ? config.qwen21.generation_lora_presets : []
+  const save = (next) => setField('qwen21', 'generation_lora_presets', next)
+  const names = presets.map((p) => (p?.name || '').trim()).filter(Boolean)
+  const current = typeof config.qwen21?.default_generation_lora_preset === 'string'
+    ? config.qwen21.default_generation_lora_preset.trim() : ''
+  const stale = !!current && !names.includes(current)
+  return (
+    <Card
+      id="qwen21-generation-lora-presets"
+      title="Qwen 2.1 generation LoRA presets (optional)"
+      help={`Named combinations of your own LoRA files, loaded by Qwen-Image 2.1 when it generates dataset images — inside a preset the order is the chain order (max ${MAX_GENERATION_LORAS} LoRAs each, ${MAX_GENERATION_LORA_PRESETS} presets), each relative to ComfyUI's models/loras. The strength range matches the Krea presets: to 6, or to 20 for filter-bypass utility LoRAs whose filename says so. The preset chosen below is what runs load until a per-run picker exists for this engine.`}
+    >
+      {presets.length === 0 && (
+        <p className="text-sm text-content-muted">No presets yet — create your first combination below.</p>
+      )}
+      {presets.map((preset, i) => (
+        <Qwen21PresetRows key={i} preset={preset} index={i} presets={presets} save={save} />
+      ))}
+      <div className="flex items-center gap-3">
+        <button
+          type="button" className={TEXT_BTN}
+          onClick={() => save([...presets, { name: freeName(presets, 'My preset'), loras: [] }])}
+          disabled={presets.length >= MAX_GENERATION_LORA_PRESETS}
+        >
+          ＋ New preset
+        </button>
+        <span className="text-xs text-content-muted">{presets.length}/{MAX_GENERATION_LORA_PRESETS}</span>
+      </div>
+      <div className="border-t border-border pt-3">
+        <label htmlFor="qwen21-default-lora-preset" className="block text-xs font-medium text-content">
+          Preset used when a run names none
+        </label>
+        <select
+          id="qwen21-default-lora-preset"
+          value={stale ? '' : current}
+          onChange={(e) => setField('qwen21', 'default_generation_lora_preset', e.target.value)}
+          className={`${INPUT_CLASS} sm:max-w-xs`}
+        >
+          <option value="">None — no extra LoRAs</option>
+          {names.map((n) => <option key={n} value={n}>{n}</option>)}
+        </select>
+        <p className="mt-1 text-xs text-content-muted">
+          Qwen 2.1 runs have no per-run preset picker yet, so this preset is what
+          every Qwen 2.1 generation loads. “None” keeps the engine LoRA-free.
+        </p>
+        {stale && (
+          <p role="alert" className="mt-1 text-[0.6875rem] text-amber-400">
+            “{current}” is no longer one of your presets, so runs load no extra LoRAs. Pick a preset to set a new default.
+          </p>
+        )}
+      </div>
+    </Card>
+  )
+}
+
 /* Editable identity / quality prompts (feature request by @bbsorry / 雨田壹).
    The identity "locks" that ride ahead of every generated variation used to be
    hardcoded and invisible; here each is an override shown in ONE editable box
@@ -2798,6 +3207,7 @@ const ENGINE_RAIL = [
       // configures the H3 engine.
       { id: 'klein', label: 'Klein', engine: 'klein', prefix: ['klein-', 'face-swap-'] },
       { id: 'krea', label: 'Krea 2 Edit', engine: 'krea', prefix: ['krea-'] },
+      { id: 'qwen21', label: 'Qwen 2.1', engine: 'qwen21', prefix: ['qwen21-'] },
       { id: 'minimax_h3', label: 'MiniMax H3', engine: 'minimax_h3',
         prefix: ['minimax-h3-', 'h3-'] },
       { id: 'seedvr2', label: 'SeedVR2', engine: 'seedvr2', prefix: ['seedvr2-'] },
@@ -2945,6 +3355,12 @@ export default function EnginesSection(props) {
       <>
         <KreaCard config={config} setField={setField} configDefaults={configDefaults} caps={caps} />
         <KreaLorasCard config={config} setField={setField} />
+      </>
+    ),
+    qwen21: () => (
+      <>
+        <Qwen21Card config={config} setField={setField} configDefaults={configDefaults} caps={caps} />
+        <Qwen21LorasCard config={config} setField={setField} />
       </>
     ),
     minimax_h3: () => (

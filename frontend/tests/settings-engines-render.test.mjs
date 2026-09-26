@@ -28,6 +28,9 @@ const CONFIG = {
   },
   klein: {}, krea: {}, minimax_h3: {}, seedvr2: {}, improve: { engine: 'klein' },
   identity_prompts: {}, comfyui: {},
+  qwen21: { ref_resolution: 1024, steps: 30, max_output_mp: 2.0, negative_prompt: '',
+            base_model: '', text_encoder: '', vae: '',
+            generation_lora_presets: [], default_generation_lora_preset: '' },
 }
 
 /* The page is a rail + detail: only the selected entry renders. `focusId` is the
@@ -62,6 +65,31 @@ test('the section renders in every ChatGPT auth lane', () => {
     const html = render({ engines: { chatgpt_auth: lane }, focusId: CHATGPT })
     assert.match(html, /ChatGPT engine auth/, lane)
   }
+})
+
+/* The Qwen 2.1 panel, RENDERED — a new engine's card that throws is a Settings
+   page that will not open, and the panel carries both the dials card and the
+   presets card (rule: mount every new branch). */
+test('the Qwen 2.1 panel renders dials, pins and the presets card', () => {
+  const html = render({ focusId: 'qwen21-ref-resolution' })
+  assert.match(html, /id="qwen21-ref-resolution"/)
+  assert.match(html, /id="qwen21-steps"/)
+  assert.match(html, /id="qwen21-max-output-mp"/)
+  assert.match(html, /id="qwen21-negative-prompt"/)
+  assert.match(html, /id="qwen21-model"/)
+  assert.match(html, /id="qwen21-text-encoder"/)
+  assert.match(html, /id="qwen21-vae"/)
+  assert.match(html, /id="qwen21-character-loras"/)
+  assert.match(html, /id="qwen21-generation-lora-presets"/)
+  assert.match(html, /id="qwen21-default-lora-preset"/)
+})
+
+test('the Qwen 2.1 pin badge names the missing state, not a generic error', () => {
+  // The deep-link lands on the base-model field (a pin the user came to fix);
+  // caps.qwen21.pin_gaps carries the SERVER's verdict, so the static mount
+  // with no caps just shows the fields — the badge needs the gap.
+  const html = render({ focusId: 'qwen21-model' })
+  assert.match(html, /auto — finds a Qwen-Image 2\.1 build/)
 })
 
 test('the comfy.org key field is offered, and needs no Test button to render', () => {

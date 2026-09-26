@@ -320,7 +320,7 @@ fix is a **ComfyUI update**, not an install. Every file is found by *searching*
 your ComfyUI model roots (including `extra_model_paths.yaml` roots), so a
 non-standard layout works untouched.
 
-Settings (config section `qwen21`, no dedicated Settings card yet):
+Settings — **Settings → Image engines → Qwen 2.1** (config section `qwen21`):
 
 - **Reference resolution** → `qwen21.ref_resolution`. Default **`1024`**. THE
   likeness ↔ speed dial of this engine: the pixel budget every reference is
@@ -341,7 +341,9 @@ Settings (config section `qwen21`, no dedicated Settings card yet):
 - **Generation LoRA presets / character LoRAs** → `qwen21.generation_lora_presets`,
   `qwen21.character_loras` — same shape and same contracts as their `krea.`
   counterparts, with the same caps (8 LoRAs per preset, 12 presets, 5 character
-  slots). Independent lists: a preset name under `krea` never reaches 2.1.
+  slots). Independent lists: a preset name under `krea` never reaches 2.1. The
+  **default preset** is what every 2.1 run loads — this engine has no per-run
+  preset picker yet, so there is no per-run override to disagree with it.
 
 ### MiniMax H3 (local)
 
