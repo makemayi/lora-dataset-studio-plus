@@ -1869,6 +1869,22 @@ def probe(force=False) -> dict:
     krea_base_resolved = _krh.resolve_krea_unet() or ''
     krea_ready = (comfy['ok'] and not krea_missing and not krea_nodes_missing
                   and not krea_blocking_invalid and not krea_pin_gaps)
+    # Qwen-Image 2.1 — the fourth LOCAL engine. Same three-part shape as Krea
+    # (weights on disk / core node present / weights actually loadable), with
+    # NO node pack: TextEncodeQwenImage21 ships in ComfyUI's core, so a missing
+    # class means "update ComfyUI", not "install something". The pin-gap and
+    # resolved-base publishes mirror Krea's for the same reasons (a pinned
+    # file that is absent is a different sentence; the elected base is named,
+    # not silent).
+    from .services import qwen21_edit_helper as _q21
+    qwen21_missing = _q21.qwen21_missing_assets()
+    qwen21_nodes_missing = _q21.qwen21_missing_nodes() if comfy['ok'] else []
+    qwen21_invalid = _q21.qwen21_invalid_assets()
+    qwen21_blocking_invalid = any(i['blocking'] for i in qwen21_invalid)
+    qwen21_pin_gaps = _q21.qwen21_pin_gaps()
+    qwen21_base_resolved = _q21.resolve_qwen21_unet() or ''
+    qwen21_ready = (comfy['ok'] and not qwen21_missing and not qwen21_nodes_missing
+                    and not qwen21_blocking_invalid and not qwen21_pin_gaps)
     # MiniMax H3 — the third LOCAL engine. Five assets and ONE mandatory node
     # pack (the frame selector); the three speed nodes and the RTX upscaler are
     # optional by design and must never gate readiness, or an ordinary install
@@ -1926,7 +1942,18 @@ def probe(force=False) -> dict:
             'qwen': qwen_['ok'],
             'klein': klein_ready,
             'krea': krea_ready,
+            'qwen21': qwen21_ready,
             'minimax_h3': h3_ready,
+        },
+        'qwen21': {
+            'ready': qwen21_ready,
+            'missing': qwen21_missing,
+            'missing_files': _q21.missing_file_entries(qwen21_missing),
+            'missing_nodes': qwen21_nodes_missing,
+            'node_hints': _q21.qwen21_node_hints(qwen21_nodes_missing),
+            'invalid': qwen21_invalid,
+            'pin_gaps': qwen21_pin_gaps,
+            'base_resolved': qwen21_base_resolved,
         },
         'minimax_h3': {
             'ready': h3_ready,

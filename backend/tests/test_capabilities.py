@@ -38,7 +38,7 @@ def test_probe_all_off_when_unconfigured(app):
             caps = capabilities.probe(force=True)
     assert caps['engines'] == {'nanobanana': False, 'chatgpt': False,
                                'openrouter': False, 'qwen': False, 'klein': False,
-                               'krea': False, 'minimax_h3': False}
+                               'krea': False, 'qwen21': False, 'minimax_h3': False}
     assert caps['training_visible'] is False and caps['studio_visible'] is False
 
 def test_python_ml_status_reports_version_and_range(app):

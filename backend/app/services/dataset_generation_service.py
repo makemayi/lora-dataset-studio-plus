@@ -26,7 +26,7 @@ from . import dataset_activity, trash
 from .face_variations import (
     aspect_for_label, is_nsfw_label, prompt_by_label, wrap_variation,
     wrap_variation_klein, wrap_variation_krea, wrap_variation_minimax_h3,
-    get_identity_prompt,
+    wrap_variation_qwen21, get_identity_prompt,
 )
 
 
@@ -45,7 +45,7 @@ def _sync_generate_activity(dataset_id):
              .filter(FaceDatasetImage.filename.is_(None))
              .filter(FaceDatasetImage.job_id.isnot(None)))
     pending = local.count()
-    # There are THREE local engines now. They queue on the same single GPU and
+    # There are FOUR local engines now. They queue on the same single GPU and
     # complete the same way, so the COUNT is shared; the label says what is
     # actually on it.
     #
@@ -63,7 +63,7 @@ def _sync_generate_activity(dataset_id):
     engine = 'klein'
     if pending:
         markers = {m for (m,) in local.with_entities(FaceDatasetImage.klein_model)}
-        engines = {m if m in (KREA_ENGINE, MINIMAX_H3_ENGINE) else 'klein'
+        engines = {m if m in (KREA_ENGINE, QWEN21_ENGINE, MINIMAX_H3_ENGINE) else 'klein'
                    for m in markers}
         engine = engines.pop() if len(engines) == 1 else 'local'
     dataset_activity.sync_pending(dataset_id, 'generate', pending, engine=engine)
@@ -260,6 +260,81 @@ def generate_variations_krea(user_id, dataset_id, variations, multiplier,
                         # Krea v1.2 fit geometry accepts the catalog canvas even
                         # when it differs from the dataset reference.
                         aspect_ratio=aspect_for_label(v.get('label'), v.get('framing')),
+                        generation_loras=run_loras,
+                        extra_metadata={'is_dataset': True, 'dataset_id': dataset_id,
+                                        'variation_label': v.get('label')})
+                except Exception:
+                    row = _live_image_row(image_id)
+                    if row is not None:
+                        row.status = 'failed'
+                        db.session.commit()
+                    raise
+                row = _live_image_row(image_id)
+                if row is None:
+                    continue     # Stop removed it mid-enqueue; nothing to report
+                row.job_id = job_id
+                db.session.commit()
+                ids.append(image_id)
+    finally:
+        _sync_generate_activity(dataset_id)
+    return ids
+
+
+def generate_variations_qwen21(user_id, dataset_id, variations, multiplier,
+                               generation_lora_preset=None):
+    """Qwen-Image 2.1 fan-out — the fourth LOCAL engine, same contract as the
+    Klein/Krea/H3 lanes: one pending row committed BEFORE its job is enqueued,
+    the whole batch preflighted up front, the created ids returned.
+
+    The engine's one dial (ref_resolution, the likeness/speed trade) is a
+    SETTING, not a per-run argument — same rule as Krea's grounding_px, since
+    it changes the meaning of every shot in the batch identically. LoRA input
+    mirrors Krea's: an optional always-on preset, NAMED from config.
+
+    The row stores the ENGINE ID in `klein_model`, like the other lanes, so
+    the grid badge can say "Qwen 2.1"; the base model itself is re-resolved
+    deterministically at enqueue and at regenerate."""
+    _guard_not_bank_export(dataset_id)
+    from . import qwen21_edit_helper as qeh
+    ds = get_dataset(user_id, dataset_id)
+    if not ds:
+        raise ValueError('dataset not found')
+    if not ds.ref_filename:
+        raise ValueError('reference image required')
+    qeh.preflight()
+    run_loras = qeh.resolve_generation_lora_preset(generation_lora_preset)
+    mult = max(1, int(multiplier))
+    total = len(variations) * mult
+    if total > MAX_FANOUT:
+        raise ValueError(f'fan-out too large ({total} > {MAX_FANOUT})')
+    in_flight = (FaceDatasetImage.query
+                 .filter_by(dataset_id=dataset_id, status='pending')
+                 .filter(FaceDatasetImage.filename.is_(None)).count())
+    if in_flight + total > MAX_FANOUT:
+        raise ValueError(f'too many generations in flight ({in_flight}), wait or cancel')
+    ids = []
+    try:
+        for v in variations:
+            source_path = _krea_pose_source_path(ds, v.get('prompt') or '')
+            for _ in range(mult):
+                img = FaceDatasetImage(dataset_id=dataset_id, source='generated',
+                                       status='pending', variation_label=v.get('label'),
+                                       framing=v.get('framing'),
+                                       variation_prompt=v['prompt'],
+                                       klein_model=QWEN21_ENGINE)
+                db.session.add(img)
+                db.session.commit()
+                image_id = img.id
+                nsfw = bool(v.get('nsfw')) or is_nsfw_label(v.get('label'))
+                try:
+                    job_id = qeh.enqueue_qwen21_edit(
+                        user_id=str(user_id), source_filename=os.path.basename(source_path),
+                        source_path=source_path,
+                        edit_prompt=wrap_variation_qwen21(
+                            v['prompt'], nsfw=nsfw, framing=v.get('framing'),
+                            suffix=dataset_prompt_suffix(ds, v.get('framing')),
+                            subject_type=subject_type_of(ds),
+                            label=v.get('label') or ''),
                         generation_loras=run_loras,
                         extra_metadata={'is_dataset': True, 'dataset_id': dataset_id,
                                         'variation_label': v.get('label')})
@@ -1123,6 +1198,26 @@ def regenerate_image(user_id, image_id, lora_strength=None, prompt=None, app=Non
             generation_loras=_keh.resolve_generation_lora_preset(generation_lora_preset),
             extra_metadata={'is_dataset': True, 'dataset_id': img.dataset_id,
                             'variation_label': img.variation_label})
+    elif target == QWEN21_ENGINE:
+        # Qwen-Image 2.1: same shape as the Krea branch above — preflight HERE,
+        # before the row transition, so the tile keeps its current image on a
+        # missing asset. Its one dial (ref_resolution) is a setting, like
+        # Krea's grounding_px.
+        engine = QWEN21_ENGINE
+        from . import qwen21_edit_helper as _qeh
+        ref_path = os.path.join(_dataset_path(ds.id), ds.ref_filename)
+        new_job_id = _qeh.enqueue_qwen21_edit(
+            user_id=str(user_id), source_filename=ds.ref_filename,
+            source_path=ref_path,
+            edit_prompt=wrap_variation_qwen21(
+                prompt, nsfw=is_nsfw_label(img.variation_label),
+                framing=img.framing,
+                suffix=dataset_prompt_suffix(ds, img.framing),
+                subject_type=subject_type_of(ds),
+                label=img.variation_label or ''),
+            generation_loras=_qeh.resolve_generation_lora_preset(generation_lora_preset),
+            extra_metadata={'is_dataset': True, 'dataset_id': img.dataset_id,
+                            'variation_label': img.variation_label})
     elif target == MINIMAX_H3_ENGINE:
         # MiniMax H3: same shape as the Krea branch above. It needs its OWN
         # branch and not the Klein fallthrough below — the `else` was written
@@ -1201,9 +1296,10 @@ def regenerate_image(user_id, image_id, lora_strength=None, prompt=None, app=Non
         img.content_sig = None
         img.content_sig_stat = None
         img.face_state = None
-        # Engine TAG for the API engines and for Krea (each resolves its own
-        # model); the real model FILE for Klein.
-        img.klein_model = (engine if target in API_ENGINES or target == KREA_ENGINE
+        # Engine TAG for the API engines and for the Krea/Qwen21 local lanes
+        # (each resolves its own model); the real model FILE for Klein.
+        img.klein_model = (engine if target in API_ENGINES
+                           or target in (KREA_ENGINE, QWEN21_ENGINE)
                            else model)
         img.filename = None
         img.caption = None
@@ -1915,14 +2011,18 @@ _ENGINE_FILE_TAG = {'nanobanana': 'NBFace', 'chatgpt': 'GPTFace', 'openrouter': 
 # H3 is the third (minimax_h3_helper).
 # APPEND-ONLY for the same reason as API_ENGINES: each id is persisted in
 # FaceDatasetImage.klein_model as that row's engine tag.
-LOCAL_ENGINES = ('klein', 'krea', 'minimax_h3')
+LOCAL_ENGINES = ('klein', 'krea', 'qwen21', 'minimax_h3')
 KREA_ENGINE = 'krea'
+# Stored on every row this lane creates (in `klein_model`, like the others) and
+# read back by the grid badge and by regenerate. NEVER rename: it is in user
+# databases the moment the first image is generated.
+QWEN21_ENGINE = 'qwen21'
 # Stored on every row this lane creates (in `klein_model`, like the others) and
 # read back by the grid badge and by regenerate. NEVER rename: it is in user
 # databases the moment the first image is generated.
 MINIMAX_H3_ENGINE = 'minimax_h3'
 LOCAL_ENGINE_LABELS = {'klein': 'Klein', 'krea': 'Krea 2 Edit',
-                       'minimax_h3': 'MiniMax H3'}
+                       'qwen21': 'Qwen 2.1', 'minimax_h3': 'MiniMax H3'}
 # Engines that GENERATE dataset images but do not edit a reference photo. Not a
 # permanent property of the engine — a deliberate scope line: MiniMax H3 ships as
 # a generation lane only, and `_enqueue_local_reference_edit` has no branch for

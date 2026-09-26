@@ -697,10 +697,14 @@ def dataset_ref_edit(dataset_id):
     except Exception as e:
         from ..services.klein_edit_helper import KleinModelsMissing
         from ..services.krea_edit_helper import KreaModelsMissing
+        from ..services.qwen21_edit_helper import (Qwen21ModelsMissing,
+                                                   Qwen21PinnedModelMissing)
         if isinstance(e, KleinModelsMissing):
             return _klein_missing_response(e.missing)
         if isinstance(e, KreaModelsMissing):
             return _krea_missing_response(e)
+        if isinstance(e, (Qwen21ModelsMissing, Qwen21PinnedModelMissing)):
+            return _qwen21_missing_response(e)
         return _map_error(e)
     return jsonify({'ok': True, 'status': 'running',
                     'engines': list(engines), 'batch_id': batch_id}), 202
@@ -929,6 +933,43 @@ def _krea_missing_response(e):
                     'krea_missing': {'assets': e.missing, 'files': files,
                                      'nodes': e.missing_nodes,
                                      'node_packs': node_packs}}), 409
+
+
+def _qwen21_missing_response(e):
+    """Turn a Qwen21ModelsMissing into a structured 409.
+
+    Same `{files, nodes, node_packs}` vocabulary as the Krea/Klein answers, but
+    with NO auto-install and NO node pack: Qwen-Image 2.1 is CORE ComfyUI
+    support — the only fix for a missing node class is a ComfyUI update, and
+    the weights resolve from wherever the user got their build (the app does
+    not re-distribute someone else's checkpoints, and inventing a download URL
+    for them would be worse than naming the gap)."""
+    from ..services import qwen21_edit_helper as qeh
+    # Both admission exceptions land here: missing assets/nodes, or a pinned
+    # file that is not on disk. The pin's sentence is already actionable
+    # (Qwen21PinnedModelMissing wrote it) — surface it as the toast, gaps in
+    # the payload.
+    pin_gaps = getattr(e, 'gaps', None) or []
+    if pin_gaps:
+        return jsonify({'ok': False, 'error': str(e), 'downloading': [],
+                        'qwen21_missing': {'assets': [], 'files': [],
+                                           'nodes': [], 'node_packs': [],
+                                           'pin_gaps': pin_gaps}}), 409
+    files = qeh.missing_file_entries(e.missing)
+    node_packs = qeh.qwen21_node_hints(e.missing_nodes)
+    parts = ["Qwen Image 2.1 can't run yet."]
+    if e.missing_nodes:
+        parts.append('Your ComfyUI is too old for Qwen-Image 2.1 — update ComfyUI '
+                     f'and restart it (it must expose {", ".join(e.missing_nodes)}).')
+    for f in files:
+        parts.append(f"Missing {f['kind']}: place it at {f['path']} inside your "
+                     f"ComfyUI folder (from {f['source']}).")
+    parts.append('Then retry the generation.')
+    return jsonify({'ok': False, 'error': ' '.join(parts),
+                    'downloading': [],
+                    'qwen21_missing': {'assets': e.missing, 'files': files,
+                                       'nodes': e.missing_nodes,
+                                       'node_packs': node_packs}}), 409
 
 
 def _seedvr2_missing_response(e):
@@ -1193,6 +1234,15 @@ def dataset_generate(dataset_id):
             mh.preflight()
         except mh.MinimaxH3ModelsMissing as e:
             return _minimax_h3_missing_response(e)
+    # Fourth LOCAL engine, same rule: weights and the core node class checked
+    # once, up front, so a mixed run cannot bill an API batch and only then
+    # find out 2.1 can't render its share.
+    if any(g == 'qwen21' for g, _ in batches):
+        from ..services import qwen21_edit_helper as qh
+        try:
+            qh.preflight()
+        except (qh.Qwen21ModelsMissing, qh.Qwen21PinnedModelMissing) as e:
+            return _qwen21_missing_response(e)
     created, per_engine = 0, {}
     try:
         # The per-engine calls each enforce MAX_FANOUT on their own share, which
@@ -1226,6 +1276,15 @@ def dataset_generate(dataset_id):
                 # and it has no measured LoRA path to expose.
                 ids = svc.generate_variations_minimax_h3(
                     LOCAL_USER, dataset_id, variations, multiplier)
+            elif generator == 'qwen21':
+                # Fourth LOCAL path (Qwen-Image 2.1): GPU-bound, free,
+                # NSFW-capable, native reference edit. Its one dial
+                # (ref_resolution) is a setting, not a per-run argument — same
+                # rule as Krea's grounding_px. Its own preset key, NOT
+                # krea's: one request can dispatch to both engines.
+                ids = svc.generate_variations_qwen21(
+                    LOCAL_USER, dataset_id, variations, multiplier,
+                    generation_lora_preset=data.get('qwen21_generation_lora_preset'))
             else:
                 ids = svc.generate_variations(LOCAL_USER, dataset_id,
                                               variations, multiplier,
@@ -1245,6 +1304,10 @@ def dataset_generate(dataset_id):
             return _klein_missing_response(e.missing)
         if isinstance(e, KreaModelsMissing):   # asset or node pack absent — no auto-fetch
             return _krea_missing_response(e)
+        from ..services.qwen21_edit_helper import (Qwen21ModelsMissing,
+                                                   Qwen21PinnedModelMissing)
+        if isinstance(e, (Qwen21ModelsMissing, Qwen21PinnedModelMissing)):
+            return _qwen21_missing_response(e)
         from ..services.minimax_h3_helper import MinimaxH3ModelsMissing
         if isinstance(e, MinimaxH3ModelsMissing):
             return _minimax_h3_missing_response(e)
@@ -2181,12 +2244,16 @@ def dataset_image_regenerate(image_id):
     except Exception as e:
         from ..services.klein_edit_helper import KleinModelsMissing
         from ..services.krea_edit_helper import KreaModelsMissing
+        from ..services.qwen21_edit_helper import (Qwen21ModelsMissing,
+                                                   Qwen21PinnedModelMissing)
         if isinstance(e, svc.KleinNodesMissing):
             return _klein_missing_response(e.missing, e.missing_nodes)
         if isinstance(e, KleinModelsMissing):
             return _klein_missing_response(e.missing)  # auto-download, tell them to retry
         if isinstance(e, KreaModelsMissing):
             return _krea_missing_response(e)
+        if isinstance(e, (Qwen21ModelsMissing, Qwen21PinnedModelMissing)):
+            return _qwen21_missing_response(e)
         return _map_error(e)
     if job_id is None:
         return jsonify({'error': 'not found'}), 404

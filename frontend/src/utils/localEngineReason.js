@@ -16,6 +16,7 @@
    stopped ComfyUI from a node pack that needs a restart. */
 import { kreaUnavailableReason } from './kreaEngine.js';
 import { minimaxH3UnavailableReason } from './minimaxH3Engine.js';
+import { qwen21UnavailableReason } from './qwen21Engine.js';
 import { comfyEnumUnavailableReason } from './comfyEnumSupport.js';
 // The REQUIRED-weights vocabulary already exists, next to the Setup step that
 // downloads them. Re-listing it here is how the picker and Setup end up naming
@@ -111,6 +112,19 @@ export function localEngineUnavailableReason(engine, caps, enabledEngines = null
       invalidAssets: comfy.krea_invalid,
       nodePackInstalled: comfy.krea_nodes_installed,
       pinGaps: comfy.krea_pin_gaps,
+    });
+  }
+  if (engine === 'qwen21') {
+    if (engines.qwen21) return null;
+    // 2.1 publishes its gaps under its own capabilities key, like H3 — see
+    // capabilities.probe (the newer engines don't squat on comfyui.*).
+    const q21 = caps?.qwen21 || {};
+    return qwen21UnavailableReason({
+      enabledInSettings: enabled('qwen21'),
+      comfyuiReachable: !!comfy.reachable,
+      comfyui: comfy,
+      missingAssets: q21.missing,
+      missingNodes: q21.missing_nodes,
     });
   }
   if (engine === 'minimax_h3') {

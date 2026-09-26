@@ -146,7 +146,7 @@ DEFAULTS = {
     # save_config; [] means "no ledger yet".
     'engines': {'default': 'chatgpt',
                 'enabled': ['nanobanana', 'chatgpt', 'openrouter', 'qwen', 'klein',
-                            'krea', 'minimax_h3'],
+                            'krea', 'qwen21', 'minimax_h3'],
                 'known': [],
                 # chatgpt_auth: 'auto' = subscription when connected, else API key.
                 # 'comfyui' is the third lane: the SAME shot through ComfyUI's
@@ -822,6 +822,45 @@ DEFAULTS = {
         'two_stage_base_megapixels': 1.0,
         # Final output size, both paths. 2.0 is the calibrated default;
         # raise for more detail (slower), lower to speed either path up.
+        'max_output_mp': 2.0,
+    },
+    # Qwen-Image 2.1 — the FOURTH local generation engine
+    # (services/qwen21_edit_helper.py). Reference edit through ComfyUI's NATIVE
+    # TextEncodeQwenImage21 node: no custom-node pack, no identity LoRA — the
+    # reference transfer is the model's own skill. Blank/absent file keys mean
+    # "find it yourself", same contract as `krea`.
+    'qwen21': {
+        'calibration_version': 1,
+        # Blank = auto-resolve a 2.1 base under any 'qwen'-named diffusion-model
+        # folder (safetensors only — the GGUF builds need a different loader
+        # class). Set it to a filename to pin one.
+        'base_model': '',
+        # The FULL Qwen3-VL-8B encoder (the 4B Krea uses produces the classic
+        # Qwen-Image clip target — wrong family). Blank = narrow 8B token match.
+        'text_encoder': '',
+        # The 2.1 VAE. The Qwen-Image 1 VAE decodes 2.1 latents as noise (the
+        # latent format changed), so there is no cross-family fallback.
+        'vae': '',
+        # THE likeness <-> speed dial: the pixel budget TextEncodeQwenImage21
+        # resizes every reference into — which is also the OUTPUT size (aspect
+        # preserved). Low = fast, softer likeness; high = stronger likeness,
+        # more VRAM. Capped by max_output_mp below.
+        'ref_resolution': 1024,
+        # Measured working profile: euler/simple, cfg 4.0, 30 steps. cfg and
+        # the sampler choice are pinned in code (qwen21_edit_helper), like
+        # Krea's pinned cfg 1.0 — 2.1 just wants the guidance Krea was
+        # distilled away from, plus a REAL negative prompt:
+        'steps': 30,
+        'negative_prompt': '',
+        # Optional always-on generation LoRAs, as NAMED presets — same shape
+        # and same contract as krea.generation_lora_presets (independent list;
+        # one name means one chain per engine).
+        'generation_lora_presets': [],
+        'default_generation_lora_preset': '',
+        # OPTIONAL extra character/person LoRAs (user-trained), chained after
+        # the base in list order. Up to 5 slots; blank rows are skipped.
+        'character_loras': [],
+        # Output size cap, in megapixels — applied to the resolution dial.
         'max_output_mp': 2.0,
     },
     # MiniMax H3 — the THIRD local generation engine (services/minimax_h3_helper.py).

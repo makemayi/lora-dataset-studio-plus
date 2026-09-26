@@ -116,6 +116,9 @@ def _preflight_local_reference_edit(ds, engine):
     if engine == KREA_ENGINE:
         from . import krea_edit_helper as helper
         helper.preflight()
+    if engine == QWEN21_ENGINE:
+        from . import qwen21_edit_helper as helper
+        helper.preflight()
     # Klein's complete admission check intentionally lives in enqueue_klein_edit;
     # all local enqueues finish before any paid API thread is started below.
 
@@ -302,6 +305,13 @@ def start_reference_edit(app, user_id, dataset_id, engine, prompt,
 #: values are mirrored in frontend EDIT_REF_SUPPORT (contract-tested), because
 #: the UI has to say this at pick time, not discover it as a silent drop.
 LOCAL_EDIT_REF_SUPPORT = {'klein': 'dataset_only', 'krea': 'modal_one',
+                          # Qwen-Image 2.1 takes the SAME shape as Krea: the
+                          # primary + ONE compositional second subject uploaded
+                          # in the dialog (its graph wires image_1/image_2 for
+                          # exactly this), never the dataset's extra angles —
+                          # reference conditioning duplicates same-face inputs
+                          # regardless of which engine encodes them.
+                          'qwen21': 'modal_one',
                           # H3 is GENERATE-ONLY (see GENERATE_ONLY_ENGINES), so
                           # this never reaches the modal. Declared anyway,
                           # because every local engine must say what it consumes
@@ -380,6 +390,14 @@ def _enqueue_local_reference_edit(user_id, dataset_id, ds, engine, prompt, token
                 # wants a different subject, and the dataset pool holds only more
                 # views of the same one. One image — the slot has room for one.
                 extra_ref_paths=local_edit_modal_refs(engine, modal_ref_paths))
+        elif engine == QWEN21_ENGINE:
+            from . import qwen21_edit_helper as helper
+            job_id = helper.enqueue_qwen21_edit(
+                user_id=str(user_id), source_filename=os.path.basename(ref_path),
+                source_path=ref_path, edit_prompt=prompt, extra_metadata=meta,
+                # Same contract as the Krea branch above: one compositional
+                # second subject from the DIALOG, wired as image_2.
+                extra_ref_paths=local_edit_modal_refs(engine, modal_ref_paths))
         else:
             from .klein_edit_helper import enqueue_klein_edit
             # The dataset's extra refs DO reach Klein (native ReferenceLatent
@@ -404,7 +422,10 @@ def _enqueue_local_reference_edit(user_id, dataset_id, ds, engine, prompt, token
     except Exception as exc:
         from .klein_edit_helper import KleinModelsMissing
         from .krea_edit_helper import KreaModelsMissing
-        if isinstance(exc, (KleinModelsMissing, KreaModelsMissing)):
+        from .qwen21_edit_helper import (Qwen21ModelsMissing,
+                                         Qwen21PinnedModelMissing)
+        if isinstance(exc, (KleinModelsMissing, KreaModelsMissing,
+                            Qwen21ModelsMissing, Qwen21PinnedModelMissing)):
             # Typed on purpose: the route turns these into the SAME auto-download
             # 409 the generate path returns. Flattening them to a ValueError would
             # downgrade "I've started fetching the weight" to a bare 400.
@@ -862,8 +883,9 @@ from .face_dataset_service import (
 # face_dataset_service's re-export, so no block here depends on the order in
 # which the parent emits them.
 from .dataset_generation_service import (
-    API_ENGINES, LOCAL_ENGINES, KREA_ENGINE, _EMPTY_MSG, _api_generate_fn,
-    engine_labels, editable_engines, edit_engine_choice_message,
+    API_ENGINES, LOCAL_ENGINES, KREA_ENGINE, QWEN21_ENGINE, _EMPTY_MSG,
+    _api_generate_fn, engine_labels, editable_engines,
+    edit_engine_choice_message,
 )
 from .dataset_import_service import face_crop_to_square_webp
 from .reference_photos_service import _all_ref_bytes, sanitize_external_reference

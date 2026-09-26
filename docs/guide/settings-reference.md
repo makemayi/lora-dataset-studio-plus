@@ -295,6 +295,54 @@ A dataset that never uploads an angle photo behaves exactly as it always has —
 
 Mirror then crop, in that order, silently loses the mirror: crop always re-derives the working photo from the untouched original you uploaded, so it has no way to know a mirror ever happened. Crop first if you need both.
 
+### Qwen-Image 2.1 (local)
+
+The **fourth** local engine. Qwen-Image 2.1 is an instruction-edit model like
+Klein, but identity comes from the reference photo itself — the model's own
+native skill, with **no character LoRA and no identity LoRA**, exactly the
+bootstrap case Krea 2 Edit serves. Unlike Krea there is **no custom-node pack**:
+the edit node (`TextEncodeQwenImage21`) ships inside ComfyUI's core, so the only
+install-side requirements are files:
+
+- a **Qwen-Image 2.1 base model** (`.safetensors`) in `models/diffusion_models` —
+  under a `qwen`-named folder or flat in the root. GGUF builds are deliberately
+  not picked up: the graph loads through ComfyUI's stock UNET loader, which
+cannot open them.
+- a **Qwen3-VL 8B** text encoder in `models/text_encoders` — 2.1 uses the full
+  8B model. The 4B encoder Krea 2 Edit uses produces a different model family's
+  embeddings and is never picked up here, nor is the 32B one MiniMax H3 uses.
+- the **Qwen Image 2.1 VAE** in `models/vae`. The older Qwen-Image VAE has a
+  different latent format and decodes 2.1 latents as noise, so it is never used
+  as a fallback.
+
+An install whose ComfyUI predates 2.1 support says so on the engine card — the
+fix is a **ComfyUI update**, not an install. Every file is found by *searching*
+your ComfyUI model roots (including `extra_model_paths.yaml` roots), so a
+non-standard layout works untouched.
+
+Settings (config section `qwen21`, no dedicated Settings card yet):
+
+- **Reference resolution** → `qwen21.ref_resolution`. Default **`1024`**. THE
+  likeness ↔ speed dial of this engine: the pixel budget every reference is
+  resized into — which is also the output size (aspect preserved). **Lower** is
+  faster with a softer likeness; **higher** holds identity harder and costs
+  VRAM. Capped by `qwen21.max_output_mp` (default `2.0`) so a big dial cannot
+  quietly exceed the VRAM contract.
+- **Sampler steps** → `qwen21.steps`. Default **`30`**, euler/simple at
+  cfg **4.0** — the measured working profile, pinned in code. cfg is not a
+  setting, like Krea's pinned cfg 1.0; 2.1 simply wants the guidance Krea was
+  distilled away from.
+- **Negative prompt** → `qwen21.negative_prompt`. Blank (default). Applied to
+  every run of this engine.
+- **Base model / text encoder / VAE files** → `qwen21.base_model`,
+  `qwen21.text_encoder`, `qwen21.vae`. Blank (default) = auto-resolve by narrow
+  token match. Set a filename to pin one; a pin that is not on disk is a hard
+  stop naming the file, never a silent fallback.
+- **Generation LoRA presets / character LoRAs** → `qwen21.generation_lora_presets`,
+  `qwen21.character_loras` — same shape and same contracts as their `krea.`
+  counterparts, with the same caps (8 LoRAs per preset, 12 presets, 5 character
+  slots). Independent lists: a preset name under `krea` never reaches 2.1.
+
 ### MiniMax H3 (local)
 
 The **third** local engine, and the only one that reaches a still photo through a

@@ -980,6 +980,24 @@ def wrap_variation_krea(prompt: str, nsfw: bool = False, framing: str | None = N
                                  card_pose_priority=True)
 
 
+def wrap_variation_qwen21(prompt: str, nsfw: bool = False, framing: str | None = None,
+                          suffix: str = '', subject_type: str = 'human',
+                          label: str = '') -> str:
+    """Full Qwen-Image 2.1 prompt for one shot.
+
+    Same shared local-edit assembly Krea uses (concrete garment, permanent
+    markings held, catalog pose given priority) — 2.1 is a reference-edit
+    model with the same three weaknesses those fixes answer, and it reads a
+    plain instruction, not a reference-naming convention like H3's
+    `<Picture 1>`. Kept as its OWN named entry point so a 2.1-specific tuning
+    can never silently change Krea's prompts (and vice versa) — the same
+    engine-boundary rule `wrap_variation_krea` documents."""
+    return _compose_edit_prompt(prompt, nsfw=nsfw, framing=framing, suffix=suffix,
+                                 subject_type=subject_type, label=label,
+                                 concrete_outfit=True, markings_lock=True,
+                                 card_pose_priority=True)
+
+
 # MiniMax H3 names its reference INSIDE the prompt: the model is told to place
 # "the subject from <Picture 1>" into the scene, and `<Picture 1>` is how it
 # addresses the first entry of the node's ref_images input. It is a token of the

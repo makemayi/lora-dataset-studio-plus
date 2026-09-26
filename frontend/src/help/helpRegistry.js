@@ -167,7 +167,16 @@ const TOPICS = [
   { id: 'dataset-engine-mode', kind: 'setting', title: 'Engines & how they share a batch',
     keywords: ['engine', 'engines', 'multiple engines', 'several engines', 'split',
       'all engines', 'compare engines', 'klein', 'krea', 'krea 2 edit', 'nano banana',
-      'chatgpt', 'cost', 'mix', 'multi-engine', 'local engine'],
+      'chatgpt', 'cost', 'mix', 'multi-engine', 'local engine', 'qwen21', 'qwen 2.1'],
+    guide: { chapter: 'settings-reference', anchor: 'image-engines' },
+    app: { route: '/datasets?section=add' } },
+  // Qwen-Image 2.1: the fourth local engine. Its one dial (how many pixels the
+  // reference is read at) lives in config under 'qwen21'; the engine card, the
+  // file layout and the ComfyUI-version requirement are what a user searches for.
+  { id: 'qwen21-engine', kind: 'setting', title: 'Qwen 2.1 (local engine)',
+    keywords: ['qwen', 'qwen21', 'qwen 2.1', 'qwen image 2.1', 'qwen-image-2.1',
+      'textencodeqwenimage21', 'local engine', 'comfyui', 'reference edit',
+      'qwen3-vl', 'qwen3vl 8b', 'text encoder', 'vae', 'core node', 'update comfyui'],
     guide: { chapter: 'settings-reference', anchor: 'image-engines' },
     app: { route: '/datasets?section=add' } },
   // Subject type: WHAT the dataset's subject is (human/animal/creature/object/

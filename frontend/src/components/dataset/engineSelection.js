@@ -20,7 +20,7 @@
 /** Canonical engine order — drives the card order, the primary pick and the
  *  round-robin. Stable: it is also the order batches are BUILT in, and the LOCAL
  *  engines must come last at DISPATCH time (see engineBatches). */
-export const ENGINES = ['klein', 'krea', 'minimax_h3', 'nanobanana', 'chatgpt', 'openrouter', 'qwen'];
+export const ENGINES = ['klein', 'krea', 'qwen21', 'minimax_h3', 'nanobanana', 'chatgpt', 'openrouter', 'qwen'];
 
 /** Engines that GENERATE dataset images but do NOT edit a reference photo, so
  *  EDIT_ENGINES derives ENGINES minus this list instead of copying it whole.
@@ -37,11 +37,12 @@ export const API_ENGINES = ['nanobanana', 'chatgpt', 'openrouter', 'qwen'];
  *  serialized on one GPU, and the ONLY ones allowed to receive 🔞 shots (the
  *  server refuses NSFW on every API engine). Mirrors
  *  face_dataset_service.LOCAL_ENGINES — derive from this, never re-list it. */
-export const LOCAL_ENGINES = ['klein', 'krea', 'minimax_h3'];
+export const LOCAL_ENGINES = ['klein', 'krea', 'qwen21', 'minimax_h3'];
 
 export const ENGINE_LABELS = {
   klein: 'Klein',
   krea: 'Krea 2 Edit',
+  qwen21: 'Qwen 2.1',
   minimax_h3: 'MiniMax H3',
   nanobanana: 'Nano Banana Pro',
   chatgpt: 'ChatGPT',
@@ -94,6 +95,19 @@ export const ENGINE_ACCENTS = {
     dot: 'bg-purple-500',
     ring: 'ring-purple-400',
   },
+  /* Teal for the fourth local-GPU engine — the one unused hue that stays apart
+     from the other three (indigo/violet/purple are the cool local family) AND
+     from every API accent (amber/sky/fuchsia/rose) in deuteranopia. Not green:
+     green means "kept / free" everywhere else in the app and stays reserved. */
+  qwen21: {
+    card: 'bg-teal-50',
+    title: 'text-teal-700',
+    text: 'text-teal-600',
+    icon: 'text-teal-600',
+    pill: 'bg-teal-100 text-teal-700',
+    dot: 'bg-teal-500',
+    ring: 'ring-teal-400',
+  },
   nanobanana: {
     card: 'bg-amber-50',
     title: 'text-amber-700',
@@ -143,7 +157,7 @@ export const ENGINE_ACCENTS = {
  *  so a user who points it at a cheaper or dearer slug pays that instead. The
  *  engine card says so — a number here is better than no guard-rail at all, but
  *  it is the only rate in this table that the user can move. */
-export const ENGINE_RATES = { klein: 0, krea: 0, minimax_h3: 0, nanobanana: 0.15, chatgpt: 0.17, openrouter: 0.15, qwen: 0.08 };
+export const ENGINE_RATES = { klein: 0, krea: 0, qwen21: 0, minimax_h3: 0, nanobanana: 0.15, chatgpt: 0.17, openrouter: 0.15, qwen: 0.08 };
 
 export const STORAGE_ENGINES = 'datasetGenerators';     // JSON list (new)
 export const STORAGE_PRIMARY = 'datasetGenerator';      // legacy string mirror — NEVER renamed

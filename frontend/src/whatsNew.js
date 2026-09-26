@@ -62,6 +62,18 @@ export const WHATS_NEW = [
     to: '/settings/local-tools',
   },
   {
+    id: '2026-09-23-qwen21-local-engine',
+    date: '2026-09-23',
+    title: '🧩 New local engine: Qwen-Image 2.1 — reference edits on your own GPU',
+    blurb: 'Qwen\'s 2.1 edit model joins Klein, Krea 2 Edit and MiniMax H3 as '
+      + 'a free, local generation engine: it re-stages your reference photo from '
+      + 'one picture with NO character LoRA, using ComfyUI\'s built-in 2.1 '
+      + 'support (no extra node pack). Point the app at a ComfyUI that has the '
+      + '2.1 base, its VAE and a Qwen3-VL 8B text encoder, and the engine card '
+      + 'goes green.',
+    to: '/datasets?section=add',
+  },
+  {
     id: '2026-09-13-refmod-12-frames-pooled',
     date: '2026-09-13',
     title: '⚡ RefMod lite: 12 frames, pooled reference — ~4x faster generation',

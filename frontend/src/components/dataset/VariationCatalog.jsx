@@ -32,6 +32,7 @@ import {
   readMode, totalImages, writeEngines, writeMode,
 } from './engineSelection.js';
 import { kreaUnavailableReason, groundingDescription } from '../../utils/kreaEngine.js';
+import { qwen21UnavailableReason } from '../../utils/qwen21Engine.js';
 import {
   KREA_REF_BOOST_MIN, KREA_REF_BOOST_MAX, KREA_REF_BOOST_STEP,
   KREA_IDENTITY_STRENGTH_MIN, KREA_IDENTITY_STRENGTH_MAX, KREA_IDENTITY_STRENGTH_STEP,
@@ -154,6 +155,24 @@ function IdentityFrameIcon({ className }) {
       <path d="M9 24c1.6-3.6 4.1-5.4 7-5.4s5.4 1.8 7 5.4" fill="none"
         stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
       <circle cx="16" cy="13" r="1.2" fill="currentColor" />
+    </svg>
+  );
+}
+
+/** Qwen-Image 2.1 — a reference frame feeding an output frame: the edit is
+ *  the model's own native skill (no LoRA, no node pack), so the glyph shows
+ *  the transformation itself, distinct from Krea's single anchored portrait
+ *  and H3's film frame. */
+function Qwen21FrameIcon({ className }) {
+  return (
+    <svg viewBox="0 0 32 32" className={className} aria-hidden="true" focusable="false">
+      <g stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3.5" y="6.5" width="15" height="12" rx="2" />
+        <circle cx="9" cy="11" r="1.7" />
+        <path d="M5.5 16.5c1.2-2.4 2.6-3.4 4.3-3.4s3.1 1 4.2 3.4" />
+        <rect x="13.5" y="13.5" width="15" height="12" rx="2" />
+        <path d="M17 19.5h8M17 22.5h5" />
+      </g>
     </svg>
   );
 }
@@ -614,6 +633,7 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, a
   // locally.
   const isKlein = engines.includes('klein');
   const isKrea = engines.includes('krea');
+  const isQwen21 = engines.includes('qwen21');
   const isH3 = engines.includes('minimax_h3');
   const multiEngine = engines.length > 1;
   // 🔞 shots stay exactly as strict as before, only the wording of "local"
@@ -751,8 +771,10 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, a
   const qwenAvailable = enabledEngines.includes('qwen') && caps.engines.qwen;
   const klAvailable = enabledEngines.includes('klein') && caps.engines.klein;
   const krAvailable = enabledEngines.includes('krea') && caps.engines.krea;
+  const q21Available = enabledEngines.includes('qwen21') && caps.engines.qwen21;
   const h3Available = enabledEngines.includes('minimax_h3') && caps.engines.minimax_h3;
-  const available = { klein: klAvailable, krea: krAvailable, minimax_h3: h3Available,
+  const available = { klein: klAvailable, krea: krAvailable, qwen21: q21Available,
+    minimax_h3: h3Available,
     nanobanana: nbAvailable, chatgpt: gptAvailable, openrouter: orAvailable,
     qwen: qwenAvailable };
 
@@ -766,11 +788,11 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, a
     if (usable.length === engines.length) return;
     const first = nbAvailable ? 'nanobanana' : gptAvailable ? 'chatgpt'
       : orAvailable ? 'openrouter' : qwenAvailable ? 'qwen' : klAvailable ? 'klein'
-      : krAvailable ? 'krea' : h3Available ? 'minimax_h3' : null;
+      : krAvailable ? 'krea' : q21Available ? 'qwen21' : h3Available ? 'minimax_h3' : null;
     setEngines(usable.length ? usable : (first ? [first] : []));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [engines, nbAvailable, gptAvailable, orAvailable, qwenAvailable, klAvailable,
-    krAvailable, h3Available]);
+    krAvailable, q21Available, h3Available]);
   // Effective ChatGPT lane: the subscription (ChatGPT Plus/Pro image quota) vs the
   // pay-per-use API key. Mirrors the backend "auto = subscription when connected".
   const gptSub = caps.chatgpt_subscription || {};
@@ -840,6 +862,15 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, a
     comfyui: caps.comfyui,
     missingAssets: caps.minimax_h3?.missing,
     missingNodes: caps.minimax_h3?.missing_nodes,
+  });
+  // Qwen 2.1: same shape as H3 — its own capabilities key and no auto-install
+  // (core node + weights, no pack). See utils/qwen21Engine.js.
+  const q21Hint = q21Available ? null : qwen21UnavailableReason({
+    enabledInSettings: enabledEngines.includes('qwen21'),
+    comfyuiReachable: !!caps.comfyui?.reachable,
+    comfyui: caps.comfyui,
+    missingAssets: caps.qwen21?.missing,
+    missingNodes: caps.qwen21?.missing_nodes,
   });
   const h3SpeedWarning = minimaxH3SpeedWarning(caps);
 
@@ -1186,6 +1217,27 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, a
             <a href="#/setup" onClick={(e) => e.stopPropagation()}
               className="text-amber-700 text-[0.625rem] underline decoration-amber-300/50">
               {kreaHint}
+            </a>
+          )} />
+        )}
+        {/* Qwen-Image 2.1 — the fourth LOCAL engine. Identity-from-reference is
+            the model's own native edit skill (core ComfyUI node, no identity
+            LoRA), and its one dial — how many pixels the reference is read at —
+            is a Setting, not a per-run knob. */}
+        {enabledEngines.includes('qwen21') && (
+        <EngineCard id="qwen21" checked={isQwen21} available={q21Available} generating={generating} laneBusy={engineCardLocked('qwen21', activities)}
+          onToggle={toggleEngine} share={engineShare('qwen21')}
+          icon={<Qwen21FrameIcon className={`w-9 h-9 shrink-0 ${isQwen21 ? ENGINE_ACCENTS.qwen21.icon : 'text-content-subtle'}`} />}
+          title={<>Qwen 2.1 <span className="font-normal text-content-subtle">· local</span></>}
+          tags={[
+            <span key="free" className="px-1.5 py-px rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[0.625rem]">Free</span>,
+            <span key="gpu" className="px-2 py-px rounded-full bg-surface-raised text-content-muted text-[0.625rem]">Your GPU</span>,
+            <span key="nsfw" className="px-2 py-px rounded-full bg-surface-raised text-content-muted text-[0.625rem]">NSFW OK</span>,
+          ]}
+          hint={q21Available ? null : (
+            <a href="#/setup" onClick={(e) => e.stopPropagation()}
+              className="text-amber-700 text-[0.625rem] underline decoration-amber-300/50">
+              {q21Hint}
             </a>
           )} />
         )}

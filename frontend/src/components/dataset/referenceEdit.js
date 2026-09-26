@@ -84,6 +84,11 @@ export const MAX_EDIT_REFS = 3;
 export const EDIT_REF_SUPPORT = {
   klein: 'dataset_only',
   krea: 'modal_one',
+  // Qwen 2.1 takes Krea's shape: primary + ONE compositional second subject
+  // from this dialog (its graph wires image_1/image_2 for exactly that), never
+  // the dataset's extra angles — reference conditioning duplicates same-face
+  // inputs regardless of which engine encodes them.
+  qwen21: 'modal_one',
   // Generate-only (see GENERATE_ONLY_ENGINES), so this never reaches the modal.
   // Declared anyway: every local engine must say what it consumes instead of
   // falling through to a default. 'none' is in neither limit map, so it takes

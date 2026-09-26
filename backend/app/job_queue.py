@@ -553,6 +553,7 @@ def _execution_error_detail(status) -> str | None:
 DATASET_IMAGE_JOB_NAMES = frozenset({
     'klein_edit_dataset',           # Klein (FLUX.2)
     'krea_identity_edit_dataset',   # Krea 2 Identity Edit
+    'qwen21_dataset',               # Qwen-Image 2.1 (native reference edit)
     'klein_face_swap_dataset',      # Klein face swap (fixed workflow)
     'seedvr2_upscale',              # SeedVR2 (fidelity upscale)
     'krea2_hq_restore_dataset',     # ✨ Improve 'klein' engine: Krea 2 Ostris Edit + SeedVR2
