@@ -23,14 +23,16 @@ before you caption anything.
 | **Preview quality** | Fast, distilled | Depends on checkpoint | Raw: slow but faithful | High, ~20 steps | Non-distilled, real CFG (~25 steps) | Real CFG 4, ~25 steps |
 | **Best for** | Fast iteration, prose-driven prompting | Booru-native checkpoints, NSFW ecosystems | Highest realism ceiling | The largest LoRA ecosystem, strong prompt fidelity | Modern FLUX.2 stack; 4B trains on mid-range GPUs | Prose-native prompting on the Qwen-Image 2.1 base |
 
-**Qwen 2.1 note:** LoRA-only, and **local-only** — there is no verified
-(downloadable) diffusers-format 2.1 repo, so the trainer reads the same stock
-checkpoint your ComfyUI uses, picked from your `qwen`-named diffusion-model
-folders. The quantized builds ComfyUI runs fine (fp8/int8 *convrot* exports)
-are **refused** as a training base — their dequantization tensors break the
-trainer's strict weight load; keep the stock bf16 (or a bare fp8 cast) build
-alongside for training. Trained LoRAs deploy to `models/loras/qwen` and mount
-through the engine's Character-LoRA chain or a generation preset.
+**Qwen 2.1 note:** LoRA-only, and **local-only**. The training base is the
+**official Qwen/Qwen-Image-2.1 repo** — downloaded into the ai-toolkit cache on
+the first run (the same mechanic as Krea-2-Raw), no manual placement. The
+quantized builds ComfyUI runs fine (fp8/int8 *convrot* exports) are **refused**
+as a custom training base — their dequantization tensors break the trainer's
+strict weight load. Trained LoRAs deploy to `models/loras/qwen` and mount
+through the engine's Character-LoRA chain or a generation preset. Requires an
+ai-toolkit checkout that carries the `qwen_image_2` arch (this install was
+updated on 2026-09-26 by extracting that extension from upstream); the
+Training panel warns when the arch is missing.
 
 **Krea note:** the default trains on **Krea-2-Raw** — the official recommendation is
 *"train on Raw, validate on Turbo"*. Raw runs are long (hours); that's normal, not stuck.

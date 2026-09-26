@@ -846,22 +846,25 @@ def _aitoolkit_supports_anima() -> bool:
 
 
 def _aitoolkit_supports_qwen_image() -> bool:
-    """Does the installed ai-toolkit know the qwen_image arch? Same CRITICAL
+    """Does the installed ai-toolkit know the QWEN-IMAGE 2.1 arch? Same CRITICAL
     stakes as _aitoolkit_supports_krea (read its comment): without a match,
-    get_model_class falls back SILENTLY to the legacy SD loader. Unlike krea2
-    (an extension added by one commit), qwen_image ships in
-    extensions_built_in/diffusion_models/qwen_image of any recent checkout —
-    but 'recent' is exactly what we cannot assume, so the same exact-string
-    scan applies (`arch = "qwen_image"`, the string _build_job_config_qwen21
-    emits; NOT the bare substring 'qwen', which older Galaxy/other mentions
-    could false-positive). Fresh read: a git pull flips it without a restart."""
+    get_model_class falls back SILENTLY to the legacy SD loader.
+
+    2.1 is a NEW architecture — QwenImage21Transformer2DModel, 32 layers (the
+    gen-1 Qwen-Image the older qwen_image extension hardcodes is 60 layers, so
+    a gen-1-configured install CANNOT load a 2.1 checkpoint). The support lives
+    in the upstream `qwen_image_2` extension (`arch = "qwen_image_2"`, verified
+    against ostris/ai-toolkit main; installs that predate it fail this scan).
+    The scan demands that EXACT string — the emitted one — never the bare
+    substring 'qwen', which gen-1 mentions would false-positive. Fresh read: a
+    git pull flips it without a restart."""
     root = cfg.aitoolkit_path('dir')
     if not root:
         return False
     ext_root = root / 'extensions_built_in'
     if not ext_root.is_dir():
         return False
-    pat = re.compile(r'arch\s*=\s*[\'"]qwen_image[\'"]')
+    pat = re.compile(r'arch\s*=\s*[\'"]qwen_image_2[\'"]')
     for dp, _dn, files in os.walk(str(ext_root)):
         for fn in files:
             if not fn.endswith('.py'):
@@ -1123,7 +1126,7 @@ _LORA_ARCH_LABEL = {'zimage': 'Z-Image', 'sdxl': 'SDXL', 'krea': 'Krea 2',
 # so they're one group (a name-only sniff can't tell them apart anyway).
 _LORA_ARCH_NAMESPACE = {'zimage': 'zimage', 'sdxl': 'sdxl', 'krea': 'krea',
                         'flux': 'flux', 'flux2klein': 'flux', 'anima': 'anima',
-                        'qwen21': 'qwen_image'}
+                        'qwen21': 'qwen_image_2'}
 
 
 def _family_from_base_model_version(value) -> str | None:
@@ -1131,15 +1134,17 @@ def _family_from_base_model_version(value) -> str | None:
     values observed on deployed LoRAs (C:\\ai-toolkit: toolkit/metadata.py stamps
     'sdxl_1.0'/'sd_1.5'/'sd_2.1'; each newer arch's get_base_model_version returns
     'zimage' / 'krea2' / 'flux' / 'flux2_klein_4b' / 'flux2_klein_9b' / 'anima' /
-    'qwen_image' — the last one VERIFIED against this install's
-    qwen_image.py:QwenImageModel, not assumed). SD1.5/2.1 and any foreign value →
-    None (not one of our trainable families)."""
+    'qwen_image_2' — the last one VERIFIED against upstream main's
+    QwenImage2Model, which returns self.arch). SD1.5/2.1 and any foreign value →
+    None (not one of our trainable families). NOTE: a gen-1 Qwen-Image LoRA
+    stamps 'qwen_image' — a DIFFERENT architecture from our qwen21 (32-layer
+    2.1) — and deliberately maps to None, never to qwen21."""
     v = str(value or '').strip().lower()
     if not v:
         return None
     if 'anima' in v:                     # AnimaModel.get_base_model_version() → 'anima'
         return 'anima'
-    if 'qwen' in v:                      # QwenImageModel.get_base_model_version() → 'qwen_image'
+    if 'qwen_image_2' in v:              # QwenImage2Model.get_base_model_version() → 'qwen_image_2'
         return 'qwen21'
     if v.startswith(('flux2_klein', 'flux2klein')):
         return 'flux2klein'
@@ -1182,13 +1187,13 @@ def _lora_arch_from_keys(keys) -> str | None:
                             and (has('.attn.wk') or has('.attn.wq')
                                  or has('.attn.gate'))):
         return 'krea'
-    # Qwen-Image 2.1 MMDiT: the save keymap rewrites 'transformer.' →
-    # 'diffusion_model.', leaving 'diffusion_model.blocks.*.attn.to_q/to_k/to_v'
-    # (diffusers attention names). '.attn.to_q' is disjoint from Krea's
-    # '.attn.wq/wk' (matched above, so Krea wins any file carrying its names)
-    # and from Anima's 'self_attn.q_proj' (matched below). Verified against this
-    # install's qwen_image.py convert_lora_weights_before_save.
-    if has('diffusion_model.blocks.') and has('.attn.to_q'):
+    # Qwen-Image 2.1: `lora_keys_use_comfy_prefix = True` and block name
+    # 'transformer_blocks' → saved keys read
+    # 'diffusion_model.transformer_blocks.*' — a signature no other family
+    # produces (Krea: 'diffusion_model.blocks.*.attn.wq/wk'; Z-Image: 'layers.';
+    # FLUX: double/single_blocks; Anima: llm_adapter). Verified against upstream
+    # main's qwen_image_2.py.
+    if has('diffusion_model.transformer_blocks.'):
         return 'qwen21'
     # Anima BEFORE the generic zimage 'layers.' check. Its signature keys off the
     # Cosmos-specific tensor names so it can never match a Krea block (which uses
@@ -1250,10 +1255,10 @@ def lora_arch_conflicts(detected, family) -> bool:
 
 _FAMILY_EXPECTED_ARCH = {'sdxl': 'sdxl', 'krea': 'krea2',
                          'flux': 'flux', 'flux2klein': 'flux', 'anima': 'anima',
-                         'qwen21': 'qwen_image'}
+                         'qwen21': 'qwen_image_2'}
 _ARCH_LABEL = {'sdxl': 'an SDXL', 'sd15': 'a Stable Diffusion 1.5',
                'flux': 'a FLUX', 'krea2': 'a Krea 2', 'anima': 'an Anima',
-               'qwen_image': 'a Qwen-Image'}
+               'qwen_image_2': 'a Qwen-Image 2.1'}
 # THE family display name — one map, used by preflight_custom_paths,
 # foreign_base_message, training_preflight and the run-summary lines.
 #
@@ -1697,7 +1702,7 @@ _TIMESTEP_TYPE_CHOICES = ('sigmoid', 'linear', 'weighted', 'shift')  # pondérat
 # les LoRA, image du pod (épinglée) pour le dense.
 _DEFAULT_TIMESTEP = {'zimage': 'sigmoid', 'krea': 'linear', 'flux': 'sigmoid',
                      'flux2klein': 'weighted', 'anima': 'weighted',
-                     'qwen21': 'weighted'}   # ce que « Auto » résout (sdxl : aucun) ; flux subject → sigmoid (reco ai-toolkit) ; flux2klein → weighted (défaut canonique options.ts, PAS sigmoid) ; anima → weighted (défaut options.ts PR #860) ; qwen21 → weighted (défaut options.ts qwen_image, lu sur l'install locale)
+                     'qwen21': 'weighted'}   # ce que « Auto » résout (sdxl : aucun) ; flux subject → sigmoid (reco ai-toolkit) ; flux2klein → weighted (défaut canonique options.ts, PAS sigmoid) ; anima → weighted (défaut options.ts PR #860) ; qwen21 → weighted (défaut options.ts qwen_image_2, lu sur upstream main)
 # Batch 2 — optimiseur / planning du LR / batch effectif (valeurs VÉRIFIÉES dans
 # ai-toolkit : get_optimizer + toolkit/scheduler.py). CAME n'est PAS supporté.
 _OPTIMIZER_CHOICES = (
@@ -5668,48 +5673,34 @@ def _build_job_config_krea(ds, dataset_folder: str, steps: int, training_folder=
 
 
 def _qwen21_name_or_path(ds) -> str:
-    """The base ai-toolkit LOADS for a Qwen 2.1 run — single resolver for the
-    lane, same contract as _krea_name_or_path.
+    """The base ai-toolkit LOADS for a Qwen 2.1 run — the official diffusers
+    repo ``Qwen/Qwen-Image-2.1`` (ai-toolkit downloads it on the first run, the
+    same mechanic as krea/Krea-2-Raw), overridden by a custom-weights pin.
 
-    There is NO verified diffusers-format 2.1 repo (Comfy-Org/Qwen-Image-2.1 is
-    ComfyUI-packaged single files), so the base is ALWAYS a local single-file
-    checkpoint: the custom-weights pin when set, else the same elected build
-    the GENERATION engine loads (qwen21_edit_helper.resolve_qwen21_unet — the
-    file this machine's ComfyUI already runs). ai-toolkit's qwen_image arch
-    loads single files via QwenImageTransformer2DModel.from_single_file with
-    config='Qwen/Qwen-Image', and its extras fallback pulls tokenizer/TE/VAE
-    from that same repo (verified against this install's qwen_image.py).
-
-    A STRUCTURED fp8/int8 export (the int8_convrot builds included) cannot be
-    loaded by ai-toolkit's strict load — assert_trainable_base_file refuses it
-    here, at build time, with model_integrity's own fix sentence. A trained
-    Qwen 2.1 LoRA therefore needs the STOCK bf16 (or bare-cast) build on disk."""
+    The pin CAN be a local path: the qwen_image_2 loaders take a single-file
+    comfy repack (config from BASE_REPO) or a full local diffusers folder
+    (which then supplies its own text encoder / VAE). A STRUCTURED fp8/int8
+    export — the int8_convrot builds ComfyUI tolerates for GENERATION — cannot
+    be strict-loaded by the trainer, so assert_trainable_base_file refuses it
+    here with the shared fix sentence."""
     base = getattr(ds, 'train_base_model', None)
     if _is_custom_weights(base):
         path = str(base)
-    else:
-        from . import qwen21_edit_helper
-        elected = qwen21_edit_helper.resolve_qwen21_unet()
-        if not elected:
-            raise ValueError(
-                'No Qwen-Image 2.1 base model found in your ComfyUI model folders '
-                '- place one (models/diffusion_models, a qwen-named folder or the '
-                'root) and pin it in Settings › Image engines › Qwen 2.1 if needed.')
-        from . import comfy_model_paths
-        path = comfy_model_paths.resolve_model_file('diffusion_models', elected) or ''
-        if not path:
-            raise ValueError(f'Qwen-Image 2.1 base {elected!r} could not be resolved to a file.')
-    assert_trainable_base_file(path)
-    return path
+        assert_trainable_base_file(path)
+        return path
+    return 'Qwen/Qwen-Image-2.1'
 
 
 def _build_job_config_qwen21(ds, dataset_folder: str, steps: int, training_folder=None) -> dict:
-    """Job-config ai-toolkit pour Qwen-Image 2.1 (arch='qwen_image', lu sur
-    l'install locale : extensions_built_in/diffusion_models/qwen_image —
-    QwenImageModel.arch). Un seul format de base : le fichier unique local
-    (cf. _qwen21_name_or_path — pas de repo diffusers 2.1 vérifié).
+    """Job-config ai-toolkit pour Qwen-Image 2.1 (arch='qwen_image_2', lu sur
+    l'UPSTREAM main : extensions_built_in/diffusion_models/qwen_image_2 —
+    QwenImage2Model.arch, le 2.1 étant une architecture PROPRE (32 couches,
+    QwenImage21Transformer2DModel — le vieux qwen_image code 60 couches et ne
+    peut pas charger un checkpoint 2.1). Base par défaut : le repo officiel
+    Qwen/Qwen-Image-2.1 (téléchargé au premier run, mécanique Krea Raw) ; un
+    pin custom local est accepté s'il est entraînable (cf. _qwen21_name_or_path).
 
-    Defaults VÉRIFIÉS contre options.ts (entrée 'qwen_image') : quantize +
+    Defaults VÉRIFIÉS contre options.ts upstream (entrée qwen_image_2) : quantize +
     quantize_te qfloat8, sampler/noise_scheduler 'flowmatch', timestep_type
     'weighted'. CFG des previews : 4.0 — la valeur MESURÉE du moteur de
     génération qwen21 de cette app (QWEN21_CFG), même logique que Krea Raw
@@ -5721,7 +5712,7 @@ def _build_job_config_qwen21(ds, dataset_folder: str, steps: int, training_folde
     trigger = _safe_trigger(ds)
     _qrank = _lora_rank(ds, 'qwen21')   # défaut 32 ; éditable via train_settings
     model = {
-        'arch': 'qwen_image',
+        'arch': 'qwen_image_2',
         'name_or_path': _qwen21_name_or_path(ds),
         **_model_memory_block(ds, 'qwen21'),
     }
@@ -5758,7 +5749,7 @@ def _build_job_config_qwen21(ds, dataset_folder: str, steps: int, training_folde
                            ds, default=True)['cache_text_embeddings'] else {}),
                     'gradient_checkpointing': True,
                     'noise_scheduler': 'flowmatch',
-                    'timestep_type': _timestep_type_eff(ds, 'weighted'),  # défaut canonique qwen_image (options.ts)
+                    'timestep_type': _timestep_type_eff(ds, 'weighted'),  # défaut canonique qwen_image_2 (options.ts)
                     'optimizer': _optimizer_eff(ds),
                     'lr': _lr_eff(ds),
                     'dtype': 'bf16',
@@ -8470,7 +8461,7 @@ def launch_training(user_id, dataset_id, steps: int | None = None, check_caption
     # ai-toolkit sans l'arch qwen_image retombe en silence sur le loader SD legacy.
     if _train_type(ds) == 'qwen21' and not _aitoolkit_supports_qwen_image():
         raise ValueError(
-            "ai-toolkit doesn't support Qwen-Image yet (qwen_image arch missing) - "
+            "ai-toolkit doesn't support Qwen-Image 2.1 yet (qwen_image_2 arch missing) - "
             "update it (git pull) before training a Qwen 2.1 LoRA.")
     if (_optimizer_eff(launch_view) == 'automagic3'
             and not _aitoolkit_supports_automagic3()):
@@ -10619,7 +10610,7 @@ def enqueue_training(user_id, dataset_id, extra_steps=None,
     # Qwen 2.1 : même garde qu'au lancement.
     if ttype == 'qwen21' and not _aitoolkit_supports_qwen_image():
         raise ValueError(
-            "ai-toolkit doesn't support Qwen-Image yet (qwen_image arch missing) - "
+            "ai-toolkit doesn't support Qwen-Image 2.1 yet (qwen_image_2 arch missing) - "
             "update it (git pull) before queuing a Qwen 2.1 LoRA.")
     if (_optimizer_eff(queue_view) == 'automagic3'
             and not _aitoolkit_supports_automagic3()):

@@ -3301,7 +3301,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
             {trainType === 'qwen21' && baseInfo && baseInfo.qwen21_supported === false && (
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-amber-700 text-[0.625rem]">
-                  ⚠️ Your ai-toolkit has no qwen_image arch — update it (git pull in the ai-toolkit folder) before training a Qwen 2.1 LoRA.
+                  ⚠️ Your ai-toolkit has no qwen_image_2 arch (the Qwen-Image 2.1 trainer) — update it from upstream (git pull in the ai-toolkit folder) before training a Qwen 2.1 LoRA.
                 </span>
               </div>
             )}
