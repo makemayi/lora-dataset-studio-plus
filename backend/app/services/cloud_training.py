@@ -2436,6 +2436,13 @@ def launch_cloud_training(user_id, dataset_id, steps=None, base_model=_UNSET,
     if fam == 'anima':
         raise ValueError('Anima cloud training is coming once the pod image is '
                          'verified — train it locally for now')
+    # Qwen 2.1 is LOCAL-ONLY: the only verified 2.1 weights are local ComfyUI
+    # single files (no diffusers repo), the pod cannot receive them through the
+    # custom-weights lane, and the pod's ai-toolkit image is unverified for the
+    # qwen_image arch. Refuse BEFORE any reservation.
+    if fam == 'qwen21':
+        raise ValueError('Qwen 2.1 cloud training is not available yet — '
+                         'train it locally for now')
     variant = (variant or '').strip().lower()
     if mode == 'full_transformer':
         if fam != 'krea':
@@ -8430,6 +8437,9 @@ def gpu_tiers(user_id, dataset_id, train_type=None, steps=None,
     if fam == 'anima':
         raise ValueError('Anima cloud training is coming once the pod image is '
                          'verified — train it locally for now')
+    if fam == 'qwen21':
+        raise ValueError('Qwen 2.1 cloud training is not available yet — '
+                         'train it locally for now')
     selected_variant = str(
         variant or getattr(ds, 'train_variant', None)
         or lt._default_variant_for(fam)).strip().lower()

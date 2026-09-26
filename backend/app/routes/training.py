@@ -939,6 +939,33 @@ def _krea_installed_bases():
     return out
 
 
+def _qwen21_installed_bases():
+    """Every Qwen-Image 2.1 checkpoint on this machine, as TRAINING base entries —
+    the same translation _krea_installed_bases does (absolute-path currency for
+    the trainer, header annotation for the picker). The scan is the PICKER's
+    candidate list (qwen-folder safetensors minus the Layered architecture and
+    GGUF builds), which is exactly the set _qwen21_name_or_path can resolve —
+    offering anything else would be a value the builder refuses. The int8_convrot
+    builds carry their untrainable verdict in the entry (trainable: False + note),
+    so the dropdown says it before a GPU is rented, not at launch."""
+    from ..services import comfy_model_paths, comfy_model_picker, model_integrity
+    files, _hint = comfy_model_picker.list_slot_files('qwen21_model')
+    out = []
+    for rel in files:
+        path = comfy_model_paths.resolve_model_file('diffusion_models', rel)
+        if not path:
+            continue
+        advisory = model_integrity.training_base_advisory(path)
+        out.append({
+            'value': path,
+            'label': os.path.basename(str(rel).replace('\\', '/')).rsplit('.', 1)[0],
+            'trainable': advisory['trainable'],
+            'quantization': advisory['form'],
+            'note': advisory['note'],
+        })
+    return out
+
+
 @bp.get('/train/base-file-advisory')
 def train_base_file_advisory():
     """The verdict a LISTED base already carries, for a path the user TYPED.
@@ -1023,6 +1050,12 @@ def dataset_train_base_info(dataset_id):
     # résumé du bouton Train (le repli côté panneau est mort depuis, cf.
     # trainingFamilyScope.js ; l'entrée reste la source de vérité).
     anima_bases = [{'value': '', 'label': f'Official - {lt.ANIMA_BASE_LABEL}'}]
+    # Qwen 2.1 : PAS de base officielle téléchargeable (pas de repo diffusers 2.1
+    # vérifié) — '' = le build élu par le résolveur de génération, listé avec les
+    # autres checkpoints locaux et leur verdict d'entraînabilité (l'int8_convrot
+    # que ComfyUI charge très bien est refusé au training, cf. _qwen21_name_or_path).
+    qwen21_bases = ([{'value': '', 'label': 'Auto — the elected Qwen-Image 2.1 build'}]
+                    + _qwen21_installed_bases())
     # Les listers de bases (get_checkpoint_models / get_zimage_models) résolvent le
     # dossier des modèles depuis comfyui.base_dir → vides tant qu'il n'est pas
     # configuré. On expose ce fait pour que l'UI dise « configure ComfyUI dans Setup »
@@ -1079,13 +1112,18 @@ def dataset_train_base_info(dataset_id):
                     # The panel uses it to stay quiet instead of recommending Anima to
                     # someone who cannot run it.
                     'anima_supported': lt._aitoolkit_supports_anima(),
+                    # Same story as anima_supported: an older ai-toolkit has no
+                    # qwen_image arch; base-info is the panel's one fetch, so the
+                    # verdict rides here instead of capabilities.
+                    'qwen21_supported': lt._aitoolkit_supports_qwen_image(),
                     # Une entrée par famille de TRAIN_TYPES, sans exception : c'est
                     # ce que le panneau lit pour peupler son sélecteur de base
                     # (test_every_family_gets_its_own_base_list).
                     'bases_by_type': {'zimage': bases, 'sdxl': sdxl_bases,
                                       'krea': krea_bases, 'flux': flux_bases,
                                       'flux2klein': flux2klein_bases,
-                                      'anima': anima_bases}})
+                                      'anima': anima_bases,
+                                      'qwen21': qwen21_bases}})
 
 
 @bp.post('/dataset/<int:dataset_id>/train/settings')

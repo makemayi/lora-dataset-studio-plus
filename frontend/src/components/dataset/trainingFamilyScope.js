@@ -96,6 +96,7 @@ const CLOUD_UNSUPPORTED = {
   sdxl: 'SDXL trains locally only — the cloud lane covers Z-Image, Krea 2 and FLUX.2 Klein',
   flux: 'FLUX.1 trains locally only — the cloud lane covers Z-Image, Krea 2 and FLUX.2 Klein',
   anima: 'Anima cloud training is coming once the pod image is verified — train it locally for now',
+  qwen21: 'Qwen 2.1 cloud training is not available yet — train it locally for now',
 };
 
 export function cloudUnsupportedFamilyReason(family) {

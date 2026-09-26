@@ -187,12 +187,15 @@ test('the dropdown tags compromised entries, and only those', () => {
 
 // --- the cloud lane names the families it does not serve ----------------------
 
-test('the three local-only families each state their own refusal', () => {
+test('the local-only families each state their own refusal', () => {
   assert.match(cloudUnsupportedFamilyReason('sdxl'), /SDXL trains locally only/);
   assert.match(cloudUnsupportedFamilyReason('flux'), /FLUX\.1 trains locally only/);
   // Anima was missing from the ladder: with enough kept images the cloud button
   // enabled itself, and the server refused only after the click.
   assert.match(cloudUnsupportedFamilyReason('anima'), /Anima cloud training is coming/);
+  // Qwen 2.1 ships local-only on purpose: no verified diffusers 2.1 repo, so a
+  // pod could neither receive the base nor is its ai-toolkit image verified.
+  assert.match(cloudUnsupportedFamilyReason('qwen21'), /Qwen 2\.1 cloud training is not available/);
 });
 
 test('the cloud-served families are not blocked by family', () => {

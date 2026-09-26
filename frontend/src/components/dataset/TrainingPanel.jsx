@@ -91,7 +91,7 @@ import {
 
 // Plancher dur / recommandé par famille — miroir de TRAIN_MIN_IMAGES côté serveur
 // (le preflight reste l'autorité ; ceci ne sert qu'à désactiver le bouton tôt).
-const TRAIN_MIN = { zimage: [12, 20], sdxl: [20, 30], krea: [15, 20], flux: [15, 20], flux2klein: [15, 20], anima: [15, 20] };
+const TRAIN_MIN = { zimage: [12, 20], sdxl: [20, 30], krea: [15, 20], flux: [15, 20], flux2klein: [15, 20], anima: [15, 20], qwen21: [15, 20] };
 // Slider mode: images are only a denoising substrate → mirror of
 // TRAIN_MIN_IMAGES_SLIDER server-side (the preflight stays authoritative).
 const TRAIN_MIN_SLIDER = [4, 12];
@@ -105,6 +105,7 @@ const SLIDER_FAMILY_NOTES = {
   flux2klein: 'FLUX.2 Klein — experimental: BFL ships an undistilled Base checkpoint made for training, which is structurally promising for sliders, but nobody has verified this trainer path yet.',
   flux: 'FLUX.1 — experimental: the slider method\'s own authors describe FLUX support as experimental.',
   sdxl: 'SDXL — experimental, ironically: sliders were born on SDXL, but ai-toolkit\'s modern slider trainer routes SDXL through its legacy model class — signature-compatible, unproven.',
+  qwen21: 'Qwen 2.1 — untested: the concept_slider trainer has no per-arch gating, but nobody has verified this path on a Qwen-Image base yet.',
 };
 
 // « Custom weights… » : valeur-sentinelle de l'entrée du sélecteur de base qui
@@ -112,9 +113,9 @@ const SLIDER_FAMILY_NOTES = {
 // (miroir de CUSTOM_WEIGHTS_FAMILIES / VAE_TE_OVERRIDE_FAMILIES côté serveur ;
 // base-info les renvoie, ces défauts ne servent qu'avant son chargement).
 const CUSTOM_BASE_SENTINEL = '__custom_weights__';
-const DEFAULT_CUSTOM_FAMILIES = ['sdxl', 'krea', 'flux', 'flux2klein'];
+const DEFAULT_CUSTOM_FAMILIES = ['sdxl', 'krea', 'flux', 'flux2klein', 'qwen21'];
 const defaultTrainingVariant = (family) => (
-  family === 'krea' ? 'base' : family === 'flux2klein' ? '4b' : 'turbo'
+  family === 'krea' || family === 'qwen21' ? 'base' : family === 'flux2klein' ? '4b' : 'turbo'
 );
 // Absolute path (Windows drive, UNC, or POSIX) no longer MEANS « Custom
 // weights… » on its own: the Krea 2
@@ -150,7 +151,7 @@ function timeAgo(iso) {
 }
 
 // Family label for a checkpoint group header — mirrors CloudRunsPage's FAMILY_LABEL.
-const GROUP_FAMILY_LABEL = { zimage: 'Z-Image', krea: 'Krea 2', sdxl: 'SDXL', flux: 'FLUX.1', flux2klein: 'FLUX.2 Klein', anima: 'Anima' };
+const GROUP_FAMILY_LABEL = { zimage: 'Z-Image', krea: 'Krea 2', sdxl: 'SDXL', flux: 'FLUX.1', flux2klein: 'FLUX.2 Klein', anima: 'Anima', qwen21: 'Qwen 2.1' };
 const groupFamLabel = (f) => GROUP_FAMILY_LABEL[f] || f || 'LoRA';
 
 const FULL_ARTIFACT_TONE = {
@@ -914,7 +915,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
         // a normal dropdown pick and must stay in the dropdown.
         setCustomBase(customBaseMode(info.base || '', info, fam));
         const v = info.variant
-          || (fam === 'krea' ? 'base' : fam === 'flux2klein' ? '4b' : 'turbo');
+          || (fam === 'krea' || fam === 'qwen21' ? 'base' : fam === 'flux2klein' ? '4b' : 'turbo');
         const safeVariant = normalizeCheckpointVariant(fam, v);
         setVariant(safeVariant);
         setTrainType(info.train_type || 'zimage');
@@ -1162,7 +1163,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
   const advDropout = adv?.dropout ?? 0;
   const advDropoutChoices = adv?.dropout_choices ?? [0.05, 0.1, 0.15, 0.2, 0.3];
   const advTimestep = adv?.timestep_type ?? 'auto';
-  const advTimestepDefault = adv?.default_timestep_type ?? (trainType === 'krea' ? 'linear' : (trainType === 'flux2klein' || trainType === 'anima') ? 'weighted' : (trainType === 'zimage' || trainType === 'flux') ? 'sigmoid' : null);   // miroir de _DEFAULT_TIMESTEP
+  const advTimestepDefault = adv?.default_timestep_type ?? (trainType === 'krea' ? 'linear' : (trainType === 'flux2klein' || trainType === 'anima' || trainType === 'qwen21') ? 'weighted' : (trainType === 'zimage' || trainType === 'flux') ? 'sigmoid' : null);   // miroir de _DEFAULT_TIMESTEP
   const advTimestepSupported = adv ? adv.timestep_type_supported !== false : trainType !== 'sdxl';
   const advTimestepChoices = adv?.timestep_type_choices ?? ['sigmoid', 'linear', 'weighted', 'shift'];
   const advOptimizer = adv?.optimizer ?? 'adamw8bit';
@@ -2650,6 +2651,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
           <option value="flux">FLUX.1 (~20 img)</option>
           <option value="flux2klein">FLUX.2 Klein (~20 img)</option>
           <option value="anima">Anima (~20 img)</option>
+          <option value="qwen21">Qwen 2.1 (~20 img)</option>
         </select>
         <div role="radiogroup" aria-label="Training mode"
           aria-describedby={[
@@ -3149,7 +3151,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                 aria-label="Base model"
                 className="px-2 py-1 rounded-lg bg-surface-raised text-content text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary max-w-[230px]">
                 {(currentBases.length ? currentBases
-                  : [{ value: '', label: trainType === 'sdxl' ? (comfyConfigured ? 'No SDXL checkpoint found' : 'ComfyUI not configured') : trainType === 'krea' ? 'Official — Krea 2' : trainType === 'flux' ? 'Official — FLUX.1-dev' : trainType === 'flux2klein' ? 'Official — FLUX.2 Klein' : trainType === 'anima' ? 'Official — Anima' : 'Official — Z-Image-Turbo' }]).map((b) => (
+                  : [{ value: '', label: trainType === 'sdxl' ? (comfyConfigured ? 'No SDXL checkpoint found' : 'ComfyUI not configured') : trainType === 'krea' ? 'Official — Krea 2' : trainType === 'flux' ? 'Official — FLUX.1-dev' : trainType === 'flux2klein' ? 'Official — FLUX.2 Klein' : trainType === 'anima' ? 'Official — Anima' : trainType === 'qwen21' ? (comfyConfigured ? 'No Qwen-Image 2.1 checkpoint found' : 'ComfyUI not configured') : 'Official — Z-Image-Turbo' }]).map((b) => (
                   <option key={b.value} value={b.value}>
                     {trainType === 'zimage' && !b.value ? 'Official recipe — selected by variant' : b.label}{b.value && baseInfo?.converted?.[b.value] ? ' ✓' : ''}{baseOptionSuffix(b)}
                   </option>
@@ -3288,12 +3290,19 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
             {!comfyConfigured && trainType !== 'flux2klein' && trainType !== 'anima' && (
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-amber-700 text-[0.625rem]">
-                  ⚠️ ComfyUI folder not set — training bases can't be listed{trainType === 'sdxl' ? '' : trainType === 'krea' ? ' (the official Krea 2 base still works)' : ' (the official Z-Image base still works)'}.
+                  ⚠️ ComfyUI folder not set — training bases can't be listed{trainType === 'sdxl' ? '' : trainType === 'krea' ? ' (the official Krea 2 base still works)' : trainType === 'qwen21' ? ' (Qwen 2.1 has no downloadable base — its weights are local files)' : ' (the official Z-Image base still works)'}.
                 </span>
                 <a href="#/setup"
                   className="px-2.5 py-1 rounded-lg bg-indigo-100 border border-indigo-200 text-indigo-700 text-[0.6875rem] font-semibold">
                   Point the app at ComfyUI →
                 </a>
+              </div>
+            )}
+            {trainType === 'qwen21' && baseInfo && baseInfo.qwen21_supported === false && (
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-amber-700 text-[0.625rem]">
+                  ⚠️ Your ai-toolkit has no qwen_image arch — update it (git pull in the ai-toolkit folder) before training a Qwen 2.1 LoRA.
+                </span>
               </div>
             )}
             {needsConversion && !baseConverted && !convertRunning && (
@@ -3798,6 +3807,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
               <option value="flux">FLUX.1</option>
               <option value="flux2klein">FLUX.2 Klein</option>
               <option value="anima">Anima</option>
+              <option value="qwen21">Qwen 2.1</option>
             </select>
             {checkpointBaseOptions.length > 0 ? (
               <select value={checkpointBase} onChange={(event) => setCheckpointBase(event.target.value)}
@@ -4353,7 +4363,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
   );
 }
 
-const _FAMILY_LABEL = { zimage: 'Z-Image', krea: 'Krea 2', sdxl: 'SDXL', flux: 'FLUX.1', flux2klein: 'FLUX.2 Klein', anima: 'Anima' };
+const _FAMILY_LABEL = { zimage: 'Z-Image', krea: 'Krea 2', sdxl: 'SDXL', flux: 'FLUX.1', flux2klein: 'FLUX.2 Klein', anima: 'Anima', qwen21: 'Qwen 2.1' };
 
 function _fmtDuration(min) {
   if (min == null) return '—';

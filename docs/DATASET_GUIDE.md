@@ -15,13 +15,22 @@ enforces or defaults to — when in doubt, the app's warnings are this guide app
 The family changes the caption style, the image count, and the settings — so decide
 before you caption anything.
 
-| | Z-Image | SDXL | Krea 2 | FLUX.1 | FLUX.2 Klein |
-|---|---|---|---|---|---|
-| **Caption style** | Prose sentences | Booru tags | Prose sentences | Prose sentences | Prose sentences |
-| **Images (min → good)** | 12 → 20+ | 20 → 30+ | 15 → 20+ | 15 → 20+ | 15 → 20+ |
-| **Training base** | Z-Image-Turbo (or a converted custom merge) | Your ComfyUI checkpoint (e.g. bigLove) | Krea-2-Raw (default), Turbo, or a Krea 2 checkpoint on your disk | FLUX.1-dev (gated HF) | FLUX.2-klein-base 4B (default) or 9B (gated HF) |
-| **Preview quality** | Fast, distilled | Depends on checkpoint | Raw: slow but faithful | High, ~20 steps | Non-distilled, real CFG (~25 steps) |
-| **Best for** | Fast iteration, prose-driven prompting | Booru-native checkpoints, NSFW ecosystems | Highest realism ceiling | The largest LoRA ecosystem, strong prompt fidelity | Modern FLUX.2 stack; 4B trains on mid-range GPUs |
+| | Z-Image | SDXL | Krea 2 | FLUX.1 | FLUX.2 Klein | Qwen 2.1 |
+|---|---|---|---|---|---|---|
+| **Caption style** | Prose sentences | Booru tags | Prose sentences | Prose sentences | Prose sentences | Prose sentences |
+| **Images (min → good)** | 12 → 20+ | 20 → 30+ | 15 → 20+ | 15 → 20+ | 15 → 20+ | 15 → 20+ |
+| **Training base** | Z-Image-Turbo (or a converted custom merge) | Your ComfyUI checkpoint (e.g. bigLove) | Krea-2-Raw (default), Turbo, or a Krea 2 checkpoint on your disk | FLUX.1-dev (gated HF) | FLUX.2-klein-base 4B (default) or 9B (gated HF) | A **stock (non-quantized) 2.1 checkpoint** on your disk — local-only, no download lane |
+| **Preview quality** | Fast, distilled | Depends on checkpoint | Raw: slow but faithful | High, ~20 steps | Non-distilled, real CFG (~25 steps) | Real CFG 4, ~25 steps |
+| **Best for** | Fast iteration, prose-driven prompting | Booru-native checkpoints, NSFW ecosystems | Highest realism ceiling | The largest LoRA ecosystem, strong prompt fidelity | Modern FLUX.2 stack; 4B trains on mid-range GPUs | Prose-native prompting on the Qwen-Image 2.1 base |
+
+**Qwen 2.1 note:** LoRA-only, and **local-only** — there is no verified
+(downloadable) diffusers-format 2.1 repo, so the trainer reads the same stock
+checkpoint your ComfyUI uses, picked from your `qwen`-named diffusion-model
+folders. The quantized builds ComfyUI runs fine (fp8/int8 *convrot* exports)
+are **refused** as a training base — their dequantization tensors break the
+trainer's strict weight load; keep the stock bf16 (or a bare fp8 cast) build
+alongside for training. Trained LoRAs deploy to `models/loras/qwen` and mount
+through the engine's Character-LoRA chain or a generation preset.
 
 **Krea note:** the default trains on **Krea-2-Raw** — the official recommendation is
 *"train on Raw, validate on Turbo"*. Raw runs are long (hours); that's normal, not stuck.

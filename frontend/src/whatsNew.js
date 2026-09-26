@@ -50,6 +50,19 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-09-26-qwen21-training',
+    date: '2026-09-26',
+    title: '🎓 Train a Qwen 2.1 LoRA — the fourth engine now has a training lane',
+    blurb: 'Pick Qwen 2.1 as a dataset\'s LoRA type and train against the same '
+      + 'stock 2.1 checkpoint your ComfyUI already runs (the fp8/int8 builds '
+      + 'ComfyUI tolerates are refused as a training base — the card names a '
+      + 'trainable one). Trained LoRAs deploy to models/loras/qwen and mount '
+      + 'through the engine\'s Character-LoRA chain or a preset. Local-only for '
+      + 'now: no cloud lane, no OneTrainer, and no verified downloadable 2.1 '
+      + 'repo — the stock build on your disk is the base.',
+    to: '/datasets?section=add',
+  },
+  {
     id: '2026-09-26-qwen21-settings-card',
     date: '2026-09-26',
     title: '🎛 Qwen 2.1 gets its Settings card — every dial and pin in one place',
