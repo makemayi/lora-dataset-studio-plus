@@ -132,6 +132,28 @@ function OllamaStatus({ caps, refreshCaps, toast }) {
   )
 }
 
+/* llama.cpp has exactly TWO states: answering, or not. There is no install to
+   detect and nothing the app may start — the server (and its model, and its GPU
+   budget) is the user's own launch. Saying anything richer would promise a
+   Start button this card does not have. */
+function LlamacppStatus({ caps }) {
+  const l = (caps && caps.llamacpp) || {}
+  if (l.reachable) {
+    return (
+      <p className="text-xs text-emerald-400">
+        <span aria-hidden="true">✓</span> llama-server is answering
+        {l.vision_model_ready ? ' · model ready' : ''}
+      </p>
+    )
+  }
+  return (
+    <HelpText className="text-xs text-content-muted">
+      <span aria-hidden="true">✗</span> Nothing answers at the URL below. Start
+      llama-server yourself (this app does not launch it), then re-test.
+    </HelpText>
+  )
+}
+
 /* The four ComfyUI folder overrides. They have always been honoured by the backend but
    had no field anywhere, so a ComfyUI started with --input-directory/--output-directory
    looked like it was being ignored (reported on Discord by vykas22).
@@ -307,84 +329,153 @@ export default function LocalToolsSection(props) {
       </Card>
 
       <Card
-        title="Ollama"
-        help="Lightweight local vision backend — captioning, framing auto-classify and head-crop."
+        id="vision-server"
+        title="Vision server (Ollama / llama.cpp)"
+        help="The local engine behind captioning, framing auto-classify, Enhance and head-crop. Ollama is the shipped default and the app can install, start and pull models for it. llama.cpp (llama-server) is the second choice: you run it yourself, the app only talks to it — it has no pull, and models are chosen when you launch llama-server."
       >
-        <OllamaStatus caps={caps} refreshCaps={refreshCaps} toast={toast} />
-        <div className="flex items-end gap-3">
-          <div className="flex-1 space-y-4">
-            <TextField
-              id="ollama-url"
-              label="Ollama URL"
-              value={config.ollama.url}
-              onChange={(v) => setField('ollama', 'url', v)}
-              placeholder="http://127.0.0.1:11434"
-            />
-            <TextField
-              id="ollama-vision-model"
-              label="Ollama vision model"
-              value={config.ollama.vision_model}
-              onChange={(v) => setField('ollama', 'vision_model', v)}
-              placeholder="huihui_ai/qwen3-vl-abliterated:8b-instruct"
-            />
-            <TestResult result={testResults.ollama} />
+        <div>
+          <label htmlFor="vision-backend" className="block text-sm font-medium text-content">Vision engine</label>
+          <select
+            id="vision-backend"
+            value={config.vision?.backend || 'ollama'}
+            onChange={(e) => setField('vision', 'backend', e.target.value)}
+            className={INPUT_CLASS}
+          >
+            <option value="ollama">Ollama (recommended — managed here)</option>
+            <option value="llamacpp">llama.cpp (llama-server — you run it)</option>
+          </select>
+          <HelpText className="mt-1 text-xs text-content-muted">
+            Every vision pass — captions, Enhance, framing, watermark and head
+            boxes, the H3 head analysis — goes to the engine picked here.
+            Switching is safe: nothing is sent anywhere until a pass runs, and
+            the app tells you which engine answered. The two engines do not
+            write captions alike, so a dataset captioned on one may read
+            differently after a pass on the other.
+          </HelpText>
+          <ResetToDefault label="Vision engine" section="vision" field="backend"
+            config={config} configDefaults={configDefaults} setField={setField} />
+        </div>
+
+        {/* Ollama's own card body. Always mounted, shown only when selected —
+            a hidden div, never an unmount, so Chrome auto-translate cannot
+            swap text nodes out from under React. */}
+        <div hidden={(config.vision?.backend || 'ollama') === 'llamacpp'} className="space-y-4 pt-2">
+          <OllamaStatus caps={caps} refreshCaps={refreshCaps} toast={toast} />
+          <div className="flex items-end gap-3">
+            <div className="flex-1 space-y-4">
+              <TextField
+                id="ollama-url"
+                label="Ollama URL"
+                value={config.ollama.url}
+                onChange={(v) => setField('ollama', 'url', v)}
+                placeholder="http://127.0.0.1:11434"
+              />
+              <TextField
+                id="ollama-vision-model"
+                label="Ollama vision model"
+                value={config.ollama.vision_model}
+                onChange={(v) => setField('ollama', 'vision_model', v)}
+                placeholder="huihui_ai/qwen3-vl-abliterated:8b-instruct"
+              />
+              <TestResult result={testResults.ollama} />
+            </div>
+            <TestButton target="ollama" beforeTest={() => saveConfigSection('ollama')}
+              onResult={(r) => recordTestResult('ollama', r)} />
           </div>
-          <TestButton target="ollama" beforeTest={() => saveConfigSection('ollama')}
-            onResult={(r) => recordTestResult('ollama', r)} />
+          {/* Ollama-ONLY dials: concurrency and keep-warm are ollama.* keys that
+              shape how the app drives Ollama. Under llama.cpp they would be
+              silent no-ops — the one thing a settings card must never be — so
+              they live inside this branch. */}
+          <div>
+            <label htmlFor="ollama-vision-concurrency" className="block text-sm font-medium text-content">
+              Images analysed at once
+            </label>
+            <select
+              id="ollama-vision-concurrency"
+              value={String(config.ollama.vision_concurrency ?? ollamaDefault('vision_concurrency'))}
+              onChange={(e) => setField('ollama', 'vision_concurrency', Number(e.target.value))}
+              className={INPUT_CLASS}
+            >
+              <option value="1">1 — one at a time (slowest, gentlest)</option>
+              <option value="2">2</option>
+              <option value="4">4 — recommended (about twice as fast)</option>
+              <option value="6">6</option>
+              <option value="8">8 — only if Ollama is set up for it</option>
+            </select>
+            <HelpText className="mt-1 text-xs text-content-muted">
+              Bank passes that read every image — watermark scan, framing, captions — send
+              this many requests to Ollama at the same time. Most of each request is
+              waiting, not computing, so overlapping them roughly halves a long pass.
+              Raising it past 4 gains little unless your Ollama is configured for more
+              parallel requests, and it makes Stop take a few seconds longer.
+            </HelpText>
+            <ResetToDefault label="Images analysed at once" section="ollama" field="vision_concurrency"
+              config={config} configDefaults={configDefaults} setField={setField} />
+          </div>
+          <div>
+            <label htmlFor="ollama-vision-keep-warm" className="block text-sm font-medium text-content">
+              Keep the vision model warm
+            </label>
+            <select
+              id="ollama-vision-keep-warm"
+              value={String(config.ollama.vision_keep_warm_seconds ?? ollamaDefault('vision_keep_warm_seconds'))}
+              onChange={(e) => setField('ollama', 'vision_keep_warm_seconds', Number(e.target.value))}
+              className={INPUT_CLASS}
+            >
+              <option value="0">Off — unload after every single image</option>
+              <option value="60">1 minute</option>
+              <option value="120">2 minutes — recommended</option>
+              <option value="300">5 minutes</option>
+              <option value="600">10 minutes</option>
+            </select>
+            <HelpText className="mt-1 text-xs text-content-muted">
+              Loading the vision model takes about 13 seconds; describing an image once
+              it's loaded takes half a second. One-off jobs — the automatic head crop on a
+              reference photo, Describe in Test Studio — used to unload it straight away,
+              so doing several in a row paid that load every time. The app now keeps it
+              loaded for this long, but only while nothing else needs the graphics card,
+              and hands the memory straight back the moment a generation or a training run
+              starts. Set it to Off if your card is tight on memory.
+            </HelpText>
+            <ResetToDefault label="Keep the vision model warm" section="ollama" field="vision_keep_warm_seconds"
+              config={config} configDefaults={configDefaults} setField={setField} />
+          </div>
         </div>
-        <div>
-          <label htmlFor="ollama-vision-concurrency" className="block text-sm font-medium text-content">
-            Images analysed at once
-          </label>
-          <select
-            id="ollama-vision-concurrency"
-            value={String(config.ollama.vision_concurrency ?? ollamaDefault('vision_concurrency'))}
-            onChange={(e) => setField('ollama', 'vision_concurrency', Number(e.target.value))}
-            className={INPUT_CLASS}
-          >
-            <option value="1">1 — one at a time (slowest, gentlest)</option>
-            <option value="2">2</option>
-            <option value="4">4 — recommended (about twice as fast)</option>
-            <option value="6">6</option>
-            <option value="8">8 — only if Ollama is set up for it</option>
-          </select>
-          <HelpText className="mt-1 text-xs text-content-muted">
-            Bank passes that read every image — watermark scan, framing, captions — send
-            this many requests to Ollama at the same time. Most of each request is
-            waiting, not computing, so overlapping them roughly halves a long pass.
-            Raising it past 4 gains little unless your Ollama is configured for more
-            parallel requests, and it makes Stop take a few seconds longer.
+
+        {/* llama.cpp: URL + model + Test. Nothing can be started or pulled —
+            llama-server is yours, and says so. */}
+        <div hidden={(config.vision?.backend || 'ollama') !== 'llamacpp'} className="space-y-4 pt-2">
+          <LlamacppStatus caps={caps} />
+          <div className="flex items-end gap-3">
+            <div className="flex-1 space-y-4">
+              <TextField
+                id="llamacpp-url"
+                label="llama-server URL"
+                value={config.llamacpp?.url || ''}
+                onChange={(v) => setField('llamacpp', 'url', v)}
+                placeholder="http://127.0.0.1:8080"
+              />
+              <TextField
+                id="llamacpp-vision-model"
+                label="llama.cpp vision model"
+                value={config.llamacpp?.vision_model || ''}
+                onChange={(v) => setField('llamacpp', 'vision_model', v)}
+                placeholder="Empty = whatever this server has loaded"
+              />
+              <TestResult result={testResults.llamacpp} />
+            </div>
+            <TestButton target="llamacpp" beforeTest={() => saveConfigSection('llamacpp')}
+              onResult={(r) => recordTestResult('llamacpp', r)} />
+          </div>
+          <HelpText className="text-xs text-content-muted">
+            Start llama-server yourself, with a VISION-capable model and its
+            mmproj file, e.g.:<br />
+            <code className="text-[0.6875rem] break-all">llama-server -m qwen3-vl-8b-instruct.gguf --mmproj mmproj.gguf</code><br />
+            The model field stays empty unless your build honours a model name
+            (router mode); blank means “whatever the server has loaded”. There
+            is no pull and no unload from here: residency and GPU layers are
+            launch-time decisions, and the app does not manage your llama-server.
           </HelpText>
-          <ResetToDefault label="Images analysed at once" section="ollama" field="vision_concurrency"
-            config={config} configDefaults={configDefaults} setField={setField} />
-        </div>
-        <div>
-          <label htmlFor="ollama-vision-keep-warm" className="block text-sm font-medium text-content">
-            Keep the vision model warm
-          </label>
-          <select
-            id="ollama-vision-keep-warm"
-            value={String(config.ollama.vision_keep_warm_seconds ?? ollamaDefault('vision_keep_warm_seconds'))}
-            onChange={(e) => setField('ollama', 'vision_keep_warm_seconds', Number(e.target.value))}
-            className={INPUT_CLASS}
-          >
-            <option value="0">Off — unload after every single image</option>
-            <option value="60">1 minute</option>
-            <option value="120">2 minutes — recommended</option>
-            <option value="300">5 minutes</option>
-            <option value="600">10 minutes</option>
-          </select>
-          <HelpText className="mt-1 text-xs text-content-muted">
-            Loading the vision model takes about 13 seconds; describing an image once
-            it's loaded takes half a second. One-off jobs — the automatic head crop on a
-            reference photo, Describe in Test Studio — used to unload it straight away,
-            so doing several in a row paid that load every time. The app now keeps it
-            loaded for this long, but only while nothing else needs the graphics card,
-            and hands the memory straight back the moment a generation or a training run
-            starts. Set it to Off if your card is tight on memory.
-          </HelpText>
-          <ResetToDefault label="Keep the vision model warm" section="ollama" field="vision_keep_warm_seconds"
-            config={config} configDefaults={configDefaults} setField={setField} />
         </div>
       </Card>
 

@@ -6,6 +6,7 @@ from flask import Blueprint, current_app, jsonify, request
 
 from .. import capabilities
 from .. import config as cfg
+from ..services import vision_llamacpp
 # The path-redaction helper moved to a shared util so services (run_share) can
 # reuse it without a route<-service back-import. Kept under its historical
 # private name here for the diagnostic call site below.
@@ -26,6 +27,9 @@ _TEST_TARGETS = {
     # probe_ollama_model so the Test button, the Setup step and the diagnostic are one
     # source of truth.
     'ollama': capabilities.probe_ollama_connection,
+    # Same end-to-end honesty for the llama.cpp card: reachable AND the configured
+    # model (if any) actually loaded.
+    'llamacpp': capabilities.probe_llamacpp_connection,
     # Folder checks PLUS an `import torch` on the chosen interpreter: a Test that
     # goes green on a Python without torch is the trap of GitHub #19 (strouder).
     'aitoolkit': capabilities.probe_aitoolkit_test,
@@ -995,6 +999,13 @@ def diagnostic():
         # slightly different identifier (namespace/registry/field variance, issue #7).
         # Model names are not secrets; paths are still absent from this block.
         'ollama': capabilities.ollama_diagnostic(),
+        # The llama.cpp model pair (configured name + what /v1/models actually
+        # lists), same self-diagnosing shape as the ollama block above — and like
+        # it, NO URL: the diagnostic paste-safety test forbids ':/' outright.
+        'llamacpp': {
+            'vision_model': cfg.get('llamacpp.vision_model') or '',
+            'models_seen': [m[:80] for m in vision_llamacpp.list_models().get('models', [])[:20]],
+        },
         # Last failed-generation reason per engine + the last Studio failure — the
         # real cause behind "it fails every time". Redacted + capped (see helper).
         'generation_errors': _recent_generation_errors(),

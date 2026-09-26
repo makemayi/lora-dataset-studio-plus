@@ -26,7 +26,7 @@ export default function EnhancePromptButton({ prompt, onResult, className = '' }
   const { fence, runGuarded, unloadAndRetry, stopWaiting } = useOllamaFence({
     onError: (e) => toast.error(e?.message || 'Enhance failed'),
   });
-  const blocked = enhanceBlocker(caps?.ollama, { capsLoading: loading });
+  const blocked = enhanceBlocker(caps?.vision || caps?.ollama, { capsLoading: loading });
   const empty = !((prompt || '').trim());
   const title = blocked
     || (empty ? 'Write a prompt first' : 'Enrich this prompt with the local model (Ollama)');

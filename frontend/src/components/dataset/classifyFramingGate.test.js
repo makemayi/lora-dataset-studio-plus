@@ -20,17 +20,17 @@ test('counts exactly what the server pass acts on: source=import AND no framing'
 });
 
 test('a dataset with nothing to classify shows NO button (empty, or fully classified)', () => {
-  assert.equal(classifyFramingState({ images: [], ollama: READY }).visible, false);
+  assert.equal(classifyFramingState({ images: [], vision: READY }).visible, false);
   assert.equal(classifyFramingState({
     images: [{ source: 'import', framing: 'face' }, { source: 'generated', framing: 'bust' }],
-    ollama: READY,
+    vision: READY,
   }).visible, false);
 });
 
 test('the label carries the count — a bare verb does not say what it will do', () => {
   const s = classifyFramingState({
     images: [{ source: 'import', framing: null }, { source: 'import', framing: null }],
-    ollama: READY,
+    vision: READY,
   });
   assert.equal(s.visible, true);
   assert.equal(s.count, 2);
@@ -50,7 +50,7 @@ test('each Ollama state names its OWN fix (never a dead button)', () => {
 });
 
 test('a blocked pass is disabled AND the reason is the tooltip', () => {
-  const s = classifyFramingState({ images: [{ source: 'import', framing: null }], ollama: {} });
+  const s = classifyFramingState({ images: [{ source: 'import', framing: null }], vision: {} });
   assert.equal(s.blocked, true);
   assert.equal(s.disabled, true);
   assert.equal(s.title, s.blockedReason);
@@ -58,7 +58,7 @@ test('a blocked pass is disabled AND the reason is the tooltip', () => {
 
 test('capabilities not loaded yet is not "missing" — no false accusation', () => {
   const s = classifyFramingState({
-    images: [{ source: 'import', framing: null }], ollama: {}, capsLoading: true,
+    images: [{ source: 'import', framing: null }], vision: {}, capsLoading: true,
   });
   assert.equal(s.blocked, false);
   assert.equal(s.blockedReason, null);
@@ -67,7 +67,7 @@ test('capabilities not loaded yet is not "missing" — no false accusation', () 
 
 test('a running pass shows its persistent progress and stays on screen', () => {
   const s = classifyFramingState({
-    images: [{ source: 'import', framing: null }], ollama: READY,
+    images: [{ source: 'import', framing: null }], vision: READY,
     activity: { kind: 'classify', done: 12, total: 1222 },
   });
   assert.equal(s.running, true);
@@ -78,7 +78,7 @@ test('a running pass shows its persistent progress and stays on screen', () => {
 
 test('another dataset activity does not masquerade as a framing pass', () => {
   const s = classifyFramingState({
-    images: [{ source: 'import', framing: null }], ollama: READY,
+    images: [{ source: 'import', framing: null }], vision: READY,
     activity: { kind: 'caption', done: 3, total: 9 },
   });
   assert.equal(s.running, false);

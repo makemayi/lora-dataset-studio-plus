@@ -6,9 +6,9 @@ import { classifyFramingState } from './classifyFramingGate';
  * seen: images imported without head-crop have no shot type, so they count for
  * nothing above. Renders nothing when there is nothing to classify. */
 export default function ClassifyFramingButton({
-  images, ollama, capsLoading = false, busy = false, activity = null, onClassify,
+  images, vision, capsLoading = false, busy = false, activity = null, onClassify,
 }) {
-  const s = classifyFramingState({ images, ollama, capsLoading, busy, activity });
+  const s = classifyFramingState({ images, vision, capsLoading, busy, activity });
   if (!s.visible) return null;
 
   return (

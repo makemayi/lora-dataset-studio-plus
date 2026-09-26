@@ -86,8 +86,10 @@ test('the model picker is inert unless the engine can reach Ollama, and keeps an
 });
 
 test('the model list comes from its own always-200 endpoint, not from capabilities', () => {
-  // caps.ollama carries the CONFIGURED model, never the installed list.
-  assert.match(ws, /apiFetch\('\/api\/ollama\/models'\)\.catch\(\(\) => \(\{ models: \[\] \}\)\)/);
+  // caps.ollama carries the CONFIGURED model, never the installed list. The
+  // endpoint is /api/vision/models: it serves whichever engine vision.backend
+  // has active (ollama OR llamacpp), so the picker never hardcodes a backend.
+  assert.match(ws, /apiFetch\('\/api\/vision\/models'\)\.catch\(\(\) => \(\{ models: \[\] \}\)\)/);
 });
 
 test('the explicit warning judges the model that will RUN, and points at a real place', () => {

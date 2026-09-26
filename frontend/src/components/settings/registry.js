@@ -18,11 +18,12 @@ export const SETTINGS_SECTIONS = [
       'rate limit', '429', 'quota', 'nsfw', 'source', 'import',
       'klein', 'small image', 'rescue', 'upscale'] },
   { id: 'local-tools', title: 'Local tools', icon: '🖥️', eyebrow: 'integrations',
-    description: 'ComfyUI, Ollama and ai-toolkit — where they run and where they live.',
-    keywords: ['comfyui', 'ollama', 'ai-toolkit', 'vision model', 'path', 'url', 'hugging face', 'hf token', 'directory', 'install'] },
+    description: 'ComfyUI, Ollama, llama.cpp and ai-toolkit — where they run and where they live.',
+    keywords: ['comfyui', 'ollama', 'llamacpp', 'llama.cpp', 'llama server', 'vision engine', 'ai-toolkit', 'vision model', 'path', 'url', 'hugging face', 'hf token', 'directory', 'install'] },
   { id: 'captioning', title: 'Captioning & quality', icon: '✍️', eyebrow: 'pipeline',
     description: 'How captions are written and how face similarity is judged.',
     keywords: ['caption', 'joycaption', 'backend', 'face score', 'threshold', 'green', 'orange', 'similarity',
+      'llamacpp', 'llama.cpp', 'vision engine',
       'import', 'resolution', 'downscale', 'normalize', '1024', 'webp', 'lossless', 'original size'] },
   { id: 'training', title: 'Training', icon: '🏋️', eyebrow: 'training',
     description: 'Default model family and cloud GPU guardrails.',
@@ -51,9 +52,12 @@ export function sectionStatus(id, caps) {
     case 'engines':
       return (e.nanobanana || e.chatgpt || e.openrouter || e.klein || e.krea) ? 'ready' : 'off'
     case 'local-tools': {
+      // Ollama OR llama.cpp serving vision counts as the same lamp: they are
+      // two engines for one job, and either one being up means vision works.
+      const visionUp = !!(c.ollama && c.ollama.reachable) || !!(c.llamacpp && c.llamacpp.reachable)
       const parts = [
         !!(c.comfyui && c.comfyui.reachable),
-        !!(c.ollama && c.ollama.reachable),
+        visionUp,
         !!(c.aitoolkit && c.aitoolkit.valid),
       ]
       const n = parts.filter(Boolean).length
@@ -61,7 +65,7 @@ export function sectionStatus(id, caps) {
     }
     case 'captioning': {
       const cap = c.captioners || {}
-      return (cap.joycaption || cap.ollama) ? 'ready' : 'off'
+      return (cap.joycaption || cap.ollama || cap.llamacpp) ? 'ready' : 'off'
     }
     case 'training':
       return c.training_visible ? (c.cloud_training ? 'ready' : 'partial') : 'off'

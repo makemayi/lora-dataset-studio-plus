@@ -104,6 +104,18 @@ DEFAULTS = {
                # nothing else wants the GPU (0 = always unload, the old
                # behaviour). See services/vision_keepalive.py.
                'vision_keep_warm_seconds': 120},
+    # llama.cpp (llama-server) — the SECOND local vision engine. The server is
+    # BYO (it needs its model file at launch, so the app never spawns it); its
+    # OpenAI-compatible /v1/chat/completions is what services/vision_llamacpp
+    # speaks. vision_model is the configured name for /v1/models matching and
+    # router-style builds; blank = "whatever this server has loaded".
+    'llamacpp': {'url': 'http://127.0.0.1:8080', 'vision_model': ''},
+    # Which local server serves EVERY vision pass (captions, enhance, framing,
+    # watermark/head bboxes, H3 head analysis). 'ollama' keeps the historical
+    # behaviour exactly; 'llamacpp' routes the same calls at llama-server.
+    # Deliberately global: the engines do not write alike, so a per-feature
+    # split would silently mix two registers in one dataset.
+    'vision': {'backend': 'ollama'},                           # ollama|llamacpp
     'aitoolkit': {'dir': '', 'datasets_dir': '', 'output_dir': '', 'hf_home': '',
                   # Explicit interpreter for installs without venv/.venv
                   # (conda, uv, system python). Empty = auto-detect.

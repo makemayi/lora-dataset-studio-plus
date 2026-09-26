@@ -16,9 +16,9 @@ import { HelpText } from '../common/HelpText';
 // never drift between "set the dataset default" and "try a candidate".
 export const ENGINE_OPTIONS = [
   { id: '', label: 'Use default (Settings ▸ Captioning)' },
-  { id: 'auto', label: 'Auto — JoyCaption, then Ollama' },
+  { id: 'auto', label: 'Auto — JoyCaption, then the vision model' },
   { id: 'joycaption', label: 'JoyCaption only' },
-  { id: 'ollama', label: 'Ollama vision only' },
+  { id: 'ollama', label: 'Vision model only (Ollama / llama.cpp)' },
   { id: 'none', label: 'None — captioning disabled' },
 ];
 
@@ -60,6 +60,12 @@ export default function CaptionOptionsPopover({ datasetId, trainType, onClose, o
   const [instructions, setInstructions] = useState('');
   const [models, setModels] = useState([]);
   const [modelsReachable, setModelsReachable] = useState(true);
+  // The ACTIVE engine's model list comes from /api/vision/models, which also
+  // says whether models can be pulled AT ALL (ollama: yes; llama.cpp: no — it
+  // lists only what its server loaded). Default true keeps the pull UI while
+  // the fetch is in flight, which matches the historical ollama behaviour.
+  const [canPull, setCanPull] = useState(true);
+  const [engine, setEngine] = useState('ollama');
   const [pullName, setPullName] = useState('');
   const [pull, setPull] = useState(null); // {state, model, progress, log, error}
   const pollRef = useRef(null);
@@ -74,7 +80,7 @@ export default function CaptionOptionsPopover({ datasetId, trainType, onClose, o
       try {
         const [opt, mdl] = await Promise.all([
           apiFetch(`/api/dataset/${datasetId}/caption/options`),
-          apiFetch('/api/ollama/models').catch(() => ({ models: [], reachable: false })),
+          apiFetch('/api/vision/models').catch(() => ({ models: [], reachable: false })),
         ]);
         if (!alive) return;
         const o = opt.options || {};
@@ -85,6 +91,8 @@ export default function CaptionOptionsPopover({ datasetId, trainType, onClose, o
         setInstructions(o.instructions || '');
         setModels(mdl.models || []);
         setModelsReachable(mdl.reachable !== false);
+        setCanPull(mdl.can_pull !== false);
+        setEngine(mdl.engine || 'ollama');
       } catch {
         if (alive) toast.error('Could not load caption options');
       } finally {
@@ -102,7 +110,7 @@ export default function CaptionOptionsPopover({ datasetId, trainType, onClose, o
   }, [datasetId, toast]);
 
   const refreshModels = async (isCurrent = () => mountedRef.current) => {
-    const mdl = await apiFetch('/api/ollama/models').catch(() => null);
+    const mdl = await apiFetch('/api/vision/models').catch(() => null);
     if (mdl && isCurrent()) {
       setModels(mdl.models || []);
       setModelsReachable(mdl.reachable !== false);
@@ -232,9 +240,9 @@ export default function CaptionOptionsPopover({ datasetId, trainType, onClose, o
               </p>
             </div>
 
-            {/* Ollama model + pull */}
+            {/* Vision model (the ACTIVE engine — Ollama or llama.cpp) + pull */}
             <div className={`flex flex-col gap-1 ${OLLAMA_RELEVANT.has(backend) ? '' : 'opacity-50'}`}>
-              <label htmlFor="cap-opt-model" className="text-sm font-medium text-content">Ollama vision model</label>
+              <label htmlFor="cap-opt-model" className="text-sm font-medium text-content">Vision model</label>
               <select id="cap-opt-model" value={ollamaModel} onChange={(e) => setOllamaModel(e.target.value)}
                 className={inputCls}>
                 <option value="">Use default (Settings ▸ Captioning)</option>
@@ -242,11 +250,12 @@ export default function CaptionOptionsPopover({ datasetId, trainType, onClose, o
               </select>
               {!modelsReachable && (
                 <p className="text-xs text-amber-400/90">
-                  Ollama isn’t reachable — start it from Settings to list or pull models.
+                  <span hidden={engine === 'llamacpp'}>Ollama isn’t reachable — start it from Settings to list or pull models.</span>
+                  <span hidden={engine !== 'llamacpp'}>The llama.cpp server isn’t answering — start llama-server to list its loaded model.</span>
                 </p>
               )}
               {trainType === 'krea' && (
-                <section aria-labelledby="krea-caption-model-title"
+                <section aria-labelledby="krea-caption-model-title" hidden={!canPull}
                   className="mt-2 rounded-lg border border-sky-400/30 bg-sky-50 p-3">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div className="min-w-0 flex-1">
@@ -277,10 +286,14 @@ export default function CaptionOptionsPopover({ datasetId, trainType, onClose, o
                   </HelpText>
                 </section>
               )}
+              {/* The pull row exists ONLY on Ollama: llama.cpp has no pull API —
+                  its models are chosen when the user launches llama-server. Both
+                  variants stay mounted (hidden), per the auto-translate rule. */}
               <p className="text-xs text-content-subtle">
-                Only used when the engine is Auto or Ollama. Pull a new vision model by name:
+                <span hidden={!canPull}>Only used when the engine is Auto or Ollama. Pull a new vision model by name:</span>
+                <span hidden={canPull}>The active llama.cpp server lists what it has loaded — models are chosen when you launch llama-server, not pulled here.</span>
               </p>
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center" hidden={!canPull}>
                 <input value={pullName} onChange={(e) => setPullName(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); startPull(); } }}
                   placeholder="e.g. huihui_ai/qwen3-vl-abliterated:8b-instruct"

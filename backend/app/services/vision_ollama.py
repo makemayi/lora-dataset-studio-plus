@@ -22,6 +22,13 @@ from . import image_encoding, input_budget  # noqa: F401 - installs the shared b
 logger = logging.getLogger(__name__)
 
 
+def _use_llamacpp() -> bool:
+    """True when Settings routes every vision pass at llama.cpp instead of Ollama.
+    Read live at each public seam, so flipping the setting takes effect on the
+    next call without a restart."""
+    return (cfg.get('vision.backend') or 'ollama').strip().lower() == 'llamacpp'
+
+
 def _ollama_url() -> str:
     # Total accessor: cfg.get() can return None (missing/corrupted config
     # section) and callers rstrip('/') the result unconditionally -- this
@@ -218,7 +225,20 @@ def describe_image_ollama(image_bytes: bytes, prompt: str, *,
     Not every checkpoint honours it (several ignore both `think:false` and
     `/no_think`), which is why the empty-`response` fallback below still exists —
     this asks, it does not guarantee. None leaves Ollama's own default alone.
+
+    With ``vision.backend`` = 'llamacpp' this dispatches to the llama.cpp engine
+    (services/vision_llamacpp), which mirrors this contract over llama-server's
+    OpenAI-compatible API; the ollama_url parameter is then ignored in favour of
+    llamacpp.url.
     """
+    if _use_llamacpp():
+        from . import vision_llamacpp
+        return vision_llamacpp.describe_image_llamacpp(
+            image_bytes, prompt, ollama_url=ollama_url, model=model,
+            num_predict=num_predict, num_ctx=num_ctx, repeat_penalty=repeat_penalty,
+            prefer_json=prefer_json, fmt=fmt, keep_alive=keep_alive,
+            num_gpu=num_gpu, think=think, auto_start_local=auto_start_local,
+            timeout=timeout)
     prepared = _ensure_ollama_decodable(image_bytes)
     if prepared is None:
         # This deliberately happens before base64 / requests.post. A malformed
@@ -338,6 +358,8 @@ def generate_text_ollama(prompt: str, *,
     any failure (the caller degrades to keeping the long caption). Same response/thinking
     extraction as describe_image_ollama so the -instruct answer is read correctly.
 
+    Dispatches to llama.cpp under ``vision.backend`` = 'llamacpp', like the vision seam.
+
     `strict=True` for a caller that has no degraded mode and must TELL the user why:
     the refusal keeps its own wording instead of collapsing to "". Silently returning
     "" makes every distinct cause — the local fence holding a model loaded outside LDS,
@@ -345,6 +367,12 @@ def generate_text_ollama(prompt: str, *,
     empty string can justify ("the model returned nothing"), which sends the user to
     check a Settings value that was never the problem. The batch captioner keeps the
     default: it has a long caption to fall back on, so a failure there is not an error."""
+    if _use_llamacpp():
+        from . import vision_llamacpp
+        return vision_llamacpp.generate_text_llamacpp(
+            prompt, ollama_url=ollama_url, model=model, num_predict=num_predict,
+            num_ctx=num_ctx, repeat_penalty=repeat_penalty, keep_alive=keep_alive,
+            strict=strict, timeout=timeout)
     try:
         url = (ollama_url or _ollama_url()).rstrip('/')
         model_name = model or get_vision_model()
@@ -390,7 +418,13 @@ def unload_vision_model(*, ollama_url: str | None = None, model: str | None = No
     keeps the old targeted best-effort semantics but still requires a strict
     successful HTTP acknowledgement. Local ownership is delegated to the fence:
     a bare call releases every tracked custom model, not just today's default.
+
+    Under ``vision.backend`` = 'llamacpp' this is a successful no-op: llama-server
+    has no remote unload (see vision_llamacpp.unload_vision_model).
     """
+    if _use_llamacpp():
+        from . import vision_llamacpp
+        return vision_llamacpp.unload_vision_model(ollama_url=ollama_url, model=model)
     try:
         url = ollama_url or _ollama_url()
         if not isinstance(url, str) or not url.strip():

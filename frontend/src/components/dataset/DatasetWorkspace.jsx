@@ -1467,7 +1467,7 @@ export default function DatasetWorkspace({ ds, onBack }) {
                       for nothing in the bar above (the default on body-fidelity datasets:
                       a whole drag-and-drop import can leave it at 0). The vision pass that
                       fills them in lives right here, under the bar that shows the gap. */}
-                  <ClassifyFramingButton images={images} ollama={caps.ollama} capsLoading={capsLoading}
+                  <ClassifyFramingButton images={images} vision={caps.vision || caps.ollama} capsLoading={capsLoading}
                     busy={ds.busy} activity={act} onClassify={(n) => ds.classify(n)} />
                   <div id="ds-add-generate" tabIndex={-1} className="scroll-mt-20">
                     {/* `busy` stays the LOCAL flag only: a batch already in

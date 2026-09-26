@@ -48,7 +48,7 @@ export default function CaptionLab({ datasetId, imageId, currentCaption, onKeep 
 
   useEffect(() => {
     let alive = true;
-    apiFetch('/api/ollama/models').catch(() => ({ models: [], reachable: false }))
+    apiFetch('/api/vision/models').catch(() => ({ models: [], reachable: false }))
       .then((mdl) => {
         if (!alive) return;
         setModels(mdl.models || []);

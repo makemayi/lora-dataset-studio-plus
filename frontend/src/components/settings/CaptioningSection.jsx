@@ -28,7 +28,7 @@ const INPUT_MAX_SIDE_OPTIONS = [
 const CAPTIONING_OPTIONS = [
   { id: 'auto', label: 'Auto (best available)' },
   { id: 'joycaption', label: 'JoyCaption' },
-  { id: 'ollama', label: 'Ollama vision' },
+  { id: 'ollama', label: 'Vision model only (Ollama / llama.cpp)' },
   { id: 'none', label: 'None' },
 ]
 
@@ -191,7 +191,7 @@ export default function CaptioningSection({ config, setField, configDefaults }) 
 
       <Card
         title="Captioning"
-        help="Who writes the captions. Auto prefers JoyCaption (via ai-toolkit) and falls back to the Ollama vision model."
+        help="Who writes the captions. Auto prefers JoyCaption (via ai-toolkit) and falls back to the local vision model — Ollama or llama.cpp, whichever Settings › Local tools has selected."
       >
         <div>
           <label htmlFor="captioning-backend" className="block text-sm font-medium text-content">Captioning backend</label>

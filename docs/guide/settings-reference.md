@@ -478,7 +478,7 @@ None of these has a Test button; you find out they work on your next scan.
 
 ## Local tools
 
-Where you point the app at the local programs that unlock the full pipeline: **ComfyUI** (Klein generation and Test Studio), **Ollama** (the vision model behind captioning and framing) and **ai-toolkit** (training and JoyCaption). Each card has a **Test** button that tells you immediately whether the app can see the tool.
+Where you point the app at the local programs that unlock the full pipeline: **ComfyUI** (Klein generation and Test Studio), the **vision server** (Ollama or llama.cpp — the vision model behind captioning, Enhance and framing) and **ai-toolkit** (training and JoyCaption). Each card has a **Test** button that tells you immediately whether the app can see the tool.
 
 ### ComfyUI
 
@@ -501,7 +501,13 @@ Where you point the app at the local programs that unlock the full pipeline: **C
 
 This now includes the **training** bases, which were the last exception: an SDXL checkpoint and a Z-Image merge declared in the yaml are listed in the base picker, accepted at launch, and handed to ai-toolkit as a real path. When the same file name exists in two roots, the one a running ComfyUI would load wins (`is_default` first), so you train on the same weights you generate with. Capitalisation of folders and file names doesn't have to match what the picker stored. And when a base genuinely cannot be found, the app says so **naming the file**, instead of passing a bare name down to ai-toolkit and letting it fail on a path you never typed.
 
-### Ollama
+### Vision server (Ollama / llama.cpp)
+
+The card opens on **Vision engine** → `vision.backend`, which picks which local server runs EVERY vision pass — captions, ✨ Enhance, framing auto-classify, head-crop, watermark/head bounding boxes and the H3 head analysis. Default **`ollama`**, which keeps the historical behaviour exactly; **`llamacpp`** routes the same calls at a llama.cpp `llama-server` over its OpenAI-compatible API. Switching takes effect on the next pass, no restart. The two engines do not write captions alike, so a dataset captioned on one may read differently after a pass on the other — the engine switch is global precisely so a dataset never silently mixes two voices.
+
+**Limits, stated plainly.** llama.cpp is **bring-your-own server**: `llama-server` needs its model file (and mmproj) at launch, so the app does not install, start, stop or pull for it — the launch flags (GPU layers, context, keep-alive) are yours. There is **no remote unload** in llama.cpp's API, so the Ollama-only VRAM fence and keep-warm lease do not apply to it; if you run llama-server on the same card as ComfyUI, managing that contention is part of launching it. The **Images analysed at once** and **Keep the vision model warm** dials are Ollama-only and only appear while Ollama is the selected engine.
+
+#### Ollama (default engine)
 
 The card shows Ollama's live state and, when the binary is installed but the server isn't running, a **▶ Start Ollama** button that launches it for you — no terminal needed.
 
@@ -526,6 +532,20 @@ No launcher downloads a model: use the explicit **Pull** button in LDS to see pr
 - **Keep the vision model warm** → `ollama.vision_keep_warm_seconds`. How long a *one-off* vision job may leave the model loaded once it's done. Default **120 s** (0 = off, capped at 600). Loading the model costs about **13 s**; describing an image once it's loaded costs about **0.5 s** — so a cold call is roughly **25×** a warm one, and the old behaviour (unload after every single image) made cropping five reference photos in a row pay that load five times. The catch is memory: the vision model really occupies about **7.5 GB**, and a loaded ComfyUI already sits near 19 GB of a 24 GB card, so they don't both fit — on Windows nothing errors out, the driver just pages silently and a vision pass measured **13.5× slower** in that state. Keeping it warm is therefore *conditional and revocable*: the app only leases it when neither a training run nor its own generation queue wants the card, and it hands the memory straight back the moment a generation is submitted or a training starts. If the app can't tell what's using the GPU, it unloads — the old behaviour. Bank passes (watermark / framing / captions) are unaffected: they already keep the model warm for their own duration and unload at the end. Set it to **Off** on a card that's tight on memory, or if you run generations from ComfyUI's own interface (work LDS never sees, so it can't revoke the lease for it — the exposure is bounded by this value). If you *want* ComfyUI and the vision model to genuinely coexist rather than take turns, the lever is on ComfyUI's side, not here: it accepts a `--reserve-vram <GB>` launch flag ("the amount of VRAM in GB to reserve for your OS/other software"), which defaults to a mere 0.7 GB on Windows — that default is exactly why a loaded ComfyUI leaves no room. Raising it caps ComfyUI and frees the headroom, at the cost of heavier video workflows. LDS never launches ComfyUI, so it can't set this for you.
 
 **Test** checks end-to-end: that Ollama is reachable *and* the configured model is actually pulled.
+
+#### llama.cpp (second engine)
+
+- **Vision engine** → set to **llama.cpp** to use it (see above).
+- **llama-server URL** → `llamacpp.url`. Where your llama-server answers. Default **`http://127.0.0.1:8080`** (llama-server's own default port).
+- **llama.cpp vision model** → `llamacpp.vision_model`. Default **empty**, which means *whatever this server has loaded* — llama-server runs ONE model, chosen when you launch it, so empty is usually right. Set a name only for router-style builds that honour the model field. **Test** checks the server answers and, when a name is set, that it appears in `/v1/models`.
+
+Example launch (a vision-capable model needs its mmproj file):
+
+```
+llama-server -m qwen3-vl-8b-instruct.gguf --mmproj mmproj-qwen3-vl-8b.gguf
+```
+
+The per-dataset model picker (Captions ▸ ⚙️ Options) lists what this server has loaded. There is **no pull here**: llama.cpp has no pull API — you place the GGUF on disk and point llama-server at it yourself.
 
 ### ai-toolkit
 
@@ -642,9 +662,9 @@ fixed sizes on purpose.
 
 | Value | Behaviour |
 |---|---|
-| `auto` *(default)* | Prefer JoyCaption (via ai-toolkit), fall back to the Ollama vision model. |
+| `auto` *(default)* | Prefer JoyCaption (via ai-toolkit), fall back to the local vision model (Ollama or llama.cpp — whichever Settings ▸ Local tools selects). |
 | `joycaption` | JoyCaption only. |
-| `ollama` | Ollama vision model only. |
+| `ollama` | Local vision model only (the value keeps its historical name; the server behind it follows `vision.backend`). |
 | `none` | No auto-captioning — you write them yourself. |
 
 `auto` is a **chain**, not a coin toss: JoyCaption captions the images it can in one

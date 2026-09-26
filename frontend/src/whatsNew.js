@@ -50,6 +50,18 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-09-26-llamacpp-vision-engine',
+    date: '2026-09-26',
+    title: '🦙 Second vision engine: llama.cpp — every vision pass can now run on llama-server',
+    blurb: 'Ollama no longer has to be the one holding your vision model. '
+      + 'Pick llama.cpp in Settings ▸ Local tools and captions, Enhance, framing '
+      + 'classify and head/watermark boxes all run against your own llama-server '
+      + '(OpenAI-compatible API). You launch llama-server yourself — it has no '
+      + 'install, start or pull here — and Ollama remains the default, so nothing '
+      + 'changes until you switch.',
+    to: '/settings/local-tools',
+  },
+  {
     id: '2026-09-13-refmod-12-frames-pooled',
     date: '2026-09-13',
     title: '⚡ RefMod lite: 12 frames, pooled reference — ~4x faster generation',

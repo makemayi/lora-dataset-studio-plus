@@ -1155,7 +1155,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
   // exactly the truth on that machine.
   useEffect(() => {
     let alive = true
-    apiFetch('/api/ollama/models').catch(() => ({ models: [] }))
+    apiFetch('/api/vision/models').catch(() => ({ models: [] }))
       .then((d) => { if (alive) setOllamaModels(d?.models || []) })
     return () => { alive = false }
   }, [])

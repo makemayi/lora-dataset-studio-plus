@@ -502,6 +502,48 @@ def probe_ollama_connection() -> dict:
     return probe_ollama_model(reachable=True)
 
 
+def probe_llamacpp() -> dict:
+    """Is the configured llama.cpp (llama-server) endpoint answering? Same shape as
+    probe_ollama: {ok, detail}. llama-server has no /api/tags — its OpenAI-compatible
+    /v1/models is the liveness probe."""
+    url = (cfg.get('llamacpp.url') or '').rstrip('/')
+    if not url:
+        return {'ok': False, 'detail': 'llamacpp.url not configured'}
+    ok = _http_ok(f'{url}/v1/models')
+    return {'ok': ok, 'detail': url if ok else f'unreachable: {url}'}
+
+
+def probe_llamacpp_model(reachable=None, model=None) -> dict:
+    """Is the configured llama.cpp vision model what the server actually has?
+    A BLANK configured model is OK by design (llama-server runs ONE model chosen
+    at launch — blank means "whatever is loaded"), so the only failures are an
+    unreachable server and a configured name the loaded list contradicts."""
+    url = (cfg.get('llamacpp.url') or '').rstrip('/')
+    model = (cfg.get('llamacpp.vision_model') or '') if model is None else model
+    if not url:
+        return {'ok': False, 'detail': 'llamacpp.url not configured'}
+    if reachable is None:
+        reachable = _http_ok(f'{url}/v1/models')
+    if not reachable:
+        return {'ok': False, 'detail': f'llama.cpp unreachable: {url}'}
+    if not model:
+        return {'ok': True, 'detail': 'server default model'}
+    from .services.vision_llamacpp import list_models
+    ids = list_models().get('models') or []
+    ok = (not ids) or model in ids   # empty list = server told us nothing: don't contradict it
+    return {'ok': ok, 'detail': f'{model} loaded' if ok else f'{model} not loaded (server has: {", ".join(ids[:3]) or "nothing"})'}
+
+
+def probe_llamacpp_connection() -> dict:
+    """The Settings 'Test' button for the llama.cpp card: reachable AND the
+    configured model (if any) actually loaded — same end-to-end honesty as
+    probe_ollama_connection."""
+    reach = probe_llamacpp()
+    if not reach['ok']:
+        return reach
+    return probe_llamacpp_model(reachable=True)
+
+
 def ollama_diagnostic() -> dict:
     """Paste-safe Ollama snapshot for /api/diagnostic: the configured vision-model
     string alongside the model tags the probe actually sees at /api/tags. This is the
@@ -1713,6 +1755,9 @@ def probe(force=False) -> dict:
     comfy = probe_comfyui()
     ollama = probe_ollama()
     ollama_installed = probe_ollama_installed()
+    llamacpp = probe_llamacpp()
+    # Read once: every vision.* line below branches on the same resolved value.
+    vision_backend = (cfg.get('vision.backend') or 'ollama').strip().lower()
     aitoolkit = probe_aitoolkit()
     gemini = probe_gemini()
     openai_ = probe_openai()
@@ -1989,6 +2034,29 @@ def probe(force=False) -> dict:
             'vision_model': cfg.get('ollama.vision_model') or '',
             'vision_model_ready': probe_ollama_model(reachable=ollama['ok'])['ok'],
         },
+        'llamacpp': {
+            # llama.cpp is BYO-server: there is no install state to detect and
+            # nothing for the app to start — reachable is the whole story.
+            'reachable': llamacpp['ok'],
+            'url': cfg.get('llamacpp.url') or '',
+            'vision_model': cfg.get('llamacpp.vision_model') or '',
+            'vision_model_ready': probe_llamacpp_model(reachable=llamacpp['ok'])['ok'],
+        },
+        # The ACTIVE local vision server, in the SAME field shape the ollama entry
+        # has always had, so generic vision gates (enhance, framing classify) read
+        # ONE object instead of hardcoding a backend. `installed` is True for
+        # llamacpp because there is nothing to install — the only state is running.
+        # (Setup's Ollama cards and the fence notice keep reading `ollama` itself.)
+        'vision': {
+            'backend': vision_backend,
+            'installed': True if vision_backend == 'llamacpp' else ollama_installed['ok'],
+            'reachable': llamacpp['ok'] if vision_backend == 'llamacpp' else ollama['ok'],
+            'url': (cfg.get('llamacpp.url') or '') if vision_backend == 'llamacpp' else (cfg.get('ollama.url') or ''),
+            'vision_model': (cfg.get('llamacpp.vision_model') or '') if vision_backend == 'llamacpp' else (cfg.get('ollama.vision_model') or ''),
+            'vision_model_ready': (probe_llamacpp_model(reachable=llamacpp['ok'])['ok']
+                                   if vision_backend == 'llamacpp'
+                                   else probe_ollama_model(reachable=ollama['ok'])['ok']),
+        },
         'aitoolkit': {
             'configured': bool(cfg.get('aitoolkit.dir')),
             'valid': aitoolkit['ok'],
@@ -2010,6 +2078,7 @@ def probe(force=False) -> dict:
             'joycaption': joycaption['ok'],
             'joycaption_detail': joycaption['detail'],
             'ollama': ollama['ok'],
+            'llamacpp': llamacpp['ok'],
         },
         'face_scoring': face_scoring['ok'],
         'masks': masks['ok'],

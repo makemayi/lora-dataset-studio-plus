@@ -327,11 +327,12 @@ function FaceSwapLorasCard({ config, setField, graphLoras = [] }) {
   )
 }
 
-/* The tags Ollama has actually PULLED, for the head-analysis stage's picker.
-   Same source as the captioning popover's list (/api/ollama/models), so the two
-   places that name an Ollama model never disagree about what exists.
+/* The tags the ACTIVE vision engine (Ollama or llama.cpp — see vision.backend)
+   offers, for the head-analysis stage's picker. Same source as the captioning
+   popover's list (/api/vision/models), so the two places that name a vision
+   model never disagree about what exists.
 
-   An unreachable Ollama answers `reachable: false` rather than throwing, which
+   An unreachable engine answers `reachable: false` rather than throwing, which
    is the difference between "you have no models" and "nothing asked yet" — the
    picker says which, instead of rendering an empty dropdown that reads as the
    former. */
@@ -339,7 +340,7 @@ function useOllamaModels() {
   const [state, setState] = useState({ models: [], reachable: null })
   useEffect(() => {
     let live = true
-    apiFetch('/api/ollama/models')
+    apiFetch('/api/vision/models')
       .then((r) => {
         if (!live) return
         setState({

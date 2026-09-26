@@ -19,21 +19,31 @@ export function countUnclassified(images) {
   return images.filter((i) => i && i.source === IMPORT_SOURCE && !i.framing).length;
 }
 
-// Ollama is the only backend for this pass (Qwen3-VL). Each state gets the ONE
-// action that fixes it — a disabled button with no reason is the failure mode we
-// are removing, not a style choice.
+// The vision pass runs on the ACTIVE local engine (caps.vision: Ollama or
+// llama.cpp — same field shape either way). Each state gets the ONE action that
+// fixes it — a disabled button with no reason is the failure mode we are
+// removing, not a style choice.
+const LLAMACPP_ABSENT = 'The llama.cpp server is not answering at its URL. Start llama-server yourself '
+  + '(the URL lives in Settings ▸ Local tools), then try again.';
 const OLLAMA_ABSENT = 'Ollama is not installed. Install it, then pull a vision model — '
   + 'Settings ▸ Local tools walks through both.';
 const OLLAMA_STOPPED = 'Ollama is installed but not running. Start it from '
   + 'Settings ▸ Local tools (▶ Start Ollama), then try again.';
 const OLLAMA_NO_MODEL = 'Ollama is running but its vision model is not pulled yet. '
   + 'Pull it from Settings ▸ Local tools, then try again.';
+const LLAMACPP_NO_MODEL = 'The llama.cpp server is running, but the model named in Settings '
+  + '▸ Local tools is not loaded. Load it in llama-server or clear the field, then try again.';
 
 /** Why the pass cannot run right now, or null. `loading` = capabilities not fetched
  * yet: unknown is NOT "missing", so we say nothing and simply keep the button idle. */
-export function classifyBlockedReason(ollama, loading = false) {
+export function classifyBlockedReason(vision, loading = false) {
   if (loading) return null;
-  const o = ollama || {};
+  const o = vision || {};
+  if (o.backend === 'llamacpp') {
+    if (!o.reachable) return LLAMACPP_ABSENT;
+    if (!o.vision_model_ready) return LLAMACPP_NO_MODEL;
+    return null;
+  }
   if (!o.installed && !o.reachable) return OLLAMA_ABSENT;
   if (!o.reachable) return OLLAMA_STOPPED;
   if (!o.vision_model_ready) return OLLAMA_NO_MODEL;
@@ -45,13 +55,13 @@ export function classifyBlockedReason(ollama, loading = false) {
  * `activity` is the dataset payload's persistent server-side batch indicator, so a
  * pass keeps showing its progress across a page reload. */
 export function classifyFramingState({
-  images, ollama, capsLoading = false, busy = false, activity = null,
+  images, vision, capsLoading = false, busy = false, activity = null,
 } = {}) {
   const count = countUnclassified(images);
   const running = !!activity && activity.kind === 'classify';
   const done = running ? (activity.done || 0) : 0;
   const total = running ? (activity.total || 0) : 0;
-  const blockedReason = classifyBlockedReason(ollama, capsLoading);
+  const blockedReason = classifyBlockedReason(vision, capsLoading);
   return {
     count,
     running,
