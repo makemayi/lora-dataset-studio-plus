@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import CompositionBar from './CompositionBar';
 import CoveragePanel from './CoveragePanel';
+import DatasetScorePanel from './DatasetScorePanel';
 import ClassifyFramingButton from './ClassifyFramingButton';
 import H3RefModButton from './H3RefModButton';
 import ReferencePanel from './ReferencePanel';
@@ -1463,6 +1464,9 @@ export default function DatasetWorkspace({ ds, onBack }) {
                       light — none of which it counts. This is that second
                       question, read from the captions already written. */}
                   <CoveragePanel datasetId={d.id} refreshKey={images.length} />
+                  {/* 一个数 + 六个维度 + 可点击的判定规则（规则存在 score_rule 表里）：
+                      分数低的时候，用户要的不是解释，是"下一步点哪个按钮"。 */}
+                  <DatasetScorePanel datasetId={d.id} refreshKey={images.length} />
                   {/* Images imported WITHOUT head-crop have no shot type, so they count
                       for nothing in the bar above (the default on body-fidelity datasets:
                       a whole drag-and-drop import can leave it at 0). The vision pass that

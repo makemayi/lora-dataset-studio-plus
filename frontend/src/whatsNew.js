@@ -50,6 +50,19 @@ import { SETUP_DEEP_LINK_STEPS } from './hooks/useSetupSteps.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-10-18-dataset-score-and-rules',
+    date: '2026-10-18',
+    title: 'Know whether a dataset will train, and fix it in one click',
+    blurb: 'Every dataset now gets an honest 0-100 score across six dimensions '
+      + '(identity consistency, variety, captions, quality, duplicates, size), with '
+      + 'the outliers grouped by cause — take-four-frames-of-one-moment, big profile '
+      + 'shots, or one collection that spans several looks. The buttons that act on '
+      + 'them are rules stored in the database, so a threshold is a setting, not a '
+      + 'rebuild.',
+    to: '/datasets?section=add',
+  },
+
+  {
     id: '2026-09-26-qwen21-training',
     date: '2026-09-26',
     title: '🎓 Train a Qwen 2.1 LoRA — the fourth engine now has a training lane',

@@ -2436,6 +2436,12 @@ def launch_cloud_training(user_id, dataset_id, steps=None, base_model=_UNSET,
     if fam == 'anima':
         raise ValueError('Anima cloud training is coming once the pod image is '
                          'verified — train it locally for now')
+    # MOSS-Image is LOCAL-ONLY: the pod's frozen ai-toolkit image predates the
+    # moss_image extension (upstream 2026-10-16) — renting would burn a GPU on an
+    # unknown arch. Refuse BEFORE any reservation. Lift once the pod ships it.
+    if fam == 'moss':
+        raise ValueError('MOSS-Image cloud training is not available yet — '
+                         'train it locally for now')
     # Qwen 2.1 is LOCAL-ONLY: the only verified 2.1 weights are local ComfyUI
     # single files (no diffusers repo), the pod cannot receive them through the
     # custom-weights lane, and the pod's ai-toolkit image is unverified for the
@@ -8437,6 +8443,11 @@ def gpu_tiers(user_id, dataset_id, train_type=None, steps=None,
     if fam == 'anima':
         raise ValueError('Anima cloud training is coming once the pod image is '
                          'verified — train it locally for now')
+    # MOSS-Image is LOCAL-ONLY: the pod's frozen ai-toolkit image predates the
+    # moss_image extension (upstream 2026-10-16). Refuse BEFORE any reservation.
+    if fam == 'moss':
+        raise ValueError('MOSS-Image cloud training is not available yet — '
+                         'train it locally for now')
     if fam == 'qwen21':
         raise ValueError('Qwen 2.1 cloud training is not available yet — '
                          'train it locally for now')

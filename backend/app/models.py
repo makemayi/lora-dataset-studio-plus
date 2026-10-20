@@ -129,6 +129,52 @@ class FaceDataset(db.Model):
         return f'<FaceDataset {self.id} {self.name}>'
 
 
+class ScoreRule(db.Model):
+    """一条**可点击执行**的判定规则（阈值 / 权重 / 处置动作）。
+
+    规则是数据而不是写死的常量：用户改的是这张表里的 params，执行时服务层从
+    这里读参数，所以「同一份逻辑」既能被按钮触发，也能被脚本/API 触发，且改完
+    立即生效、重启后还在、有 updated_at 可追溯。
+
+    category: weight(维度权重) | threshold(阈值) | action(处置动作) | pass(分析流程)
+    key      : 稳定标识（前端/脚本都用它，不要改名，改名要留别名）
+    params   : JSON。threshold 类通常是 {"value": 0.55} 或 {"value": ..., "unit": ...}
+    action   : 执行入口名（见 services/score_rules.APPLIERS），NULL = 只存参数不直接执行
+    """
+    __tablename__ = 'score_rule'
+    key = db.Column(String(48), primary_key=True)
+    name = db.Column(String(80), nullable=False)
+    category = db.Column(String(16), nullable=False)
+    params = db.Column(db.Text, nullable=True)
+    action = db.Column(String(32), nullable=True)
+    description = db.Column(db.Text, nullable=True)
+    enabled = db.Column(db.Boolean, nullable=False, default=True)
+    sort = db.Column(Integer, nullable=False, default=0)
+    updated_at = db.Column(DateTime, nullable=True)
+
+
+class DatasetScoreReport(db.Model):
+    """一个数据集最近一次评分的快照（dataset 级）。新表 → db.create_all 会建。
+
+    为什么不只放 JSON 缓存文件：评分要能在 UI 里排序/筛选数据集，也要在重启后
+    还在。per-image 的事实放 face_dataset_image 的列（可 SQL 聚合），这里只存
+    汇总量与算它时的指纹（图片一变即视为过期）。
+    """
+    __tablename__ = 'dataset_score_report'
+    dataset_id = db.Column(
+        Integer, db.ForeignKey('face_dataset.id', ondelete='CASCADE'), primary_key=True)
+    fingerprint = db.Column(String(16), nullable=True)
+    total = db.Column(Integer, nullable=True)
+    measured = db.Column(Integer, nullable=True)
+    median = db.Column(Float, nullable=True)
+    p10 = db.Column(Float, nullable=True)
+    multi_identity = db.Column(db.Boolean, nullable=True)
+    identities_json = db.Column(db.Text, nullable=True)
+    dims_json = db.Column(db.Text, nullable=True)
+    groups_json = db.Column(db.Text, nullable=True)
+    computed_at = db.Column(DateTime, nullable=True)
+
+
 class FaceDatasetImage(db.Model):
     """One image of a face-dataset: a generated Klein variation or an imported real photo."""
     __tablename__ = 'face_dataset_image'
@@ -197,6 +243,19 @@ class FaceDatasetImage(db.Model):
     # Triage bar's 👥👥 Multi-person one-click reject. NULL = not measured:
     # never reads as "single person".
     n_faces = db.Column(Integer, nullable=True)
+    # ── 组内一致性（无参考图模式）落库：让评分/离群报告可 SQL 查询、可跨重启 ──
+    # cluster_sim = 该图与**其它所有图**的余弦中位数；identity_group = 连通分量编号
+    # （余弦 ≥0.35 连边，1=最大分量）。NULL = 这个集还没跑过组内打分。
+    cluster_sim = db.Column(Float, nullable=True)
+    cluster_sim_max = db.Column(Float, nullable=True)
+    identity_group = db.Column(Integer, nullable=True)
+    # 离群成因：duplicate / profile / weak / drift / other_identity。NULL = 不离群。
+    score_cause = db.Column(String(16), nullable=True)
+    # 判成因还需要的三个检测事实（以前只在内存/JSON 缓存里，落库后 UI 才能直接显示
+    # "yaw 61° / det 0.76 / 连拍伙伴"）。face_det = 检测置信度，face_bbox = 人脸面积占比。
+    face_det = db.Column(Float, nullable=True)
+    face_bbox = db.Column(Float, nullable=True)
+    dhash = db.Column(String(16), nullable=True)
     # Pourquoi status='failed' : message d'erreur du moteur (API/sauvegarde/queue),
     # affiché sur la tuile — sinon l'échec est muet et l'utilisateur relance à
     # l'aveugle. Nettoyé au regenerate. Colonne additive (migration create_app).

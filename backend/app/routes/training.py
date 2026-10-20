@@ -82,6 +82,22 @@ def _require_onetrainer():
     return None
 
 
+def _require_fizgig():
+    """None if Fizgig is usable, else the (body, status) 409 to return."""
+    from ..services import fizgig_service as fzs
+    if not fzs.is_installed():
+        return jsonify({'error': 'Fizgig is not configured',
+                        'hint': 'Set its folder in Settings'}), 409
+    return None
+
+
+def _any_local_trainer() -> bool:
+    """Is ANY local trainer usable? The live-run routes answer for whichever
+    lane owns the run, so an install with only one of them must not be refused."""
+    return (not _require_aitoolkit() or not _require_onetrainer()
+            or not _require_fizgig())
+
+
 def _full_transformer_artifact_response(run):
     """409 redirect metadata for routes that otherwise treat a file as a LoRA.
 
@@ -132,6 +148,20 @@ def dataset_train(dataset_id):
         from ..services import onetrainer_service as ots
         try:
             res = ots.launch_training(LOCAL_USER, dataset_id, steps=d.get('steps'))
+        except Exception as e:
+            return _map_error(e)
+        return jsonify({'ok': True, **res})
+    if trainer == 'fizgig':
+        gate = _require_fizgig()
+        if gate:
+            return gate
+        if not svc.get_dataset(LOCAL_USER, dataset_id):
+            return jsonify({'error': 'not found'}), 404
+        from ..services import fizgig_service as fzs
+        try:
+            res = fzs.launch_training(
+                LOCAL_USER, dataset_id, steps=d.get('steps'),
+                **{k: bool(d.get(k)) for k in fzs._ALLOW_FLAGS})
         except Exception as e:
             return _map_error(e)
         return jsonify({'ok': True, **res})
@@ -242,8 +272,7 @@ def dataset_train_status():
     # configuré, on renvoie juste 'indisponible' au lieu d'un 409 qui casserait
     # le polling UI. OneTrainer compte aussi : un poste avec SEULEMENT OneTrainer
     # configuré (pas d'ai-toolkit du tout) doit encore pouvoir poller.
-    from ..services import onetrainer_service as ots
-    if not capabilities.probe()['aitoolkit']['valid'] and not ots.is_installed():
+    if not _any_local_trainer():
         return jsonify({'available': False})
     # Le poll fait avancer la file : fin du training courant → lancement du suivant.
     try:
@@ -298,6 +327,9 @@ def dataset_train_enqueue(dataset_id):
     # Checked BEFORE the ai-toolkit gate: a OneTrainer-only request must get its
     # explicit "not supported yet" 400, not ai-toolkit's unrelated 409 when
     # ai-toolkit itself happens to be unconfigured.
+    if (d.get('trainer') or 'ai_toolkit') == 'fizgig':
+        return jsonify({'error': 'queueing a Fizgig run is not supported yet — '
+                                 'start it when the GPU is free'}), 400
     if (d.get('trainer') or 'ai_toolkit') == 'onetrainer':
         return jsonify({'error': 'queueing a OneTrainer run is not supported yet — '
                                  'launch it directly instead'}), 400
@@ -574,7 +606,7 @@ def dataset_train_progress(dataset_id):
     # OneTrainer must not be refused here — it was, which is one of the two
     # reasons that lane never showed progress.
     gate = _require_aitoolkit()
-    if gate and _require_onetrainer():
+    if gate and not _any_local_trainer():
         return gate
     if not svc.get_dataset(LOCAL_USER, dataset_id):
         return jsonify({'error': 'not found'}), 404
@@ -600,7 +632,7 @@ def dataset_train_sample(dataset_id, filename):
     """Serve one training sample image. Filename is whitelist-validated (no
     separators/traversal) and resolved strictly inside the run's samples dir."""
     gate = _require_aitoolkit()
-    if gate and _require_onetrainer():
+    if gate and not _any_local_trainer():
         return gate
     if not svc.get_dataset(LOCAL_USER, dataset_id):
         return jsonify({'error': 'not found'}), 404
@@ -614,6 +646,12 @@ def dataset_train_sample(dataset_id, filename):
         if ot_path:
             from flask import send_file
             return send_file(ot_path, conditional=True)
+    if not _require_fizgig():
+        from ..services import fizgig_service as fzs
+        fz_path = fzs.sample_path(LOCAL_USER, dataset_id, filename)
+        if fz_path:
+            from flask import send_file
+            return send_file(fz_path, conditional=True)
     if gate:
         return gate
     bm = request.args.get('base_model')
@@ -1001,6 +1039,9 @@ def train_base_file_advisory():
                         'level': 'error', 'quantization': '',
                         'note': f'{name} is not at that path.'}), 200
     advisory = model_integrity.training_base_advisory(raw)
+    if not advisory['trainable'] and (request.args.get('family') or '') == 'moss':
+        if lt._is_moss_convrot_export(model_integrity.quantization_report(raw)):
+            advisory = {**advisory, 'trainable': True, 'level': '', 'note': None}
     return jsonify({'status': 'ok', 'filename': name,
                     'trainable': advisory['trainable'],
                     'level': advisory['level'],
@@ -1050,6 +1091,10 @@ def dataset_train_base_info(dataset_id):
     # résumé du bouton Train (le repli côté panneau est mort depuis, cf.
     # trainingFamilyScope.js ; l'entrée reste la source de vérité).
     anima_bases = [{'value': '', 'label': f'Official - {lt.ANIMA_BASE_LABEL}'}]
+    # MOSS-Image : Base (reco OpenMOSS pour LoRA) par défaut, SFT sélectionnable —
+    # les deux repos publics ; le pick SFT (repo id) passe tel quel au builder.
+    moss_bases = [{'value': '', 'label': f'Official - {lt.MOSS_BASE_LABEL} (recommended for training)'},
+                  {'value': lt.MOSS_SFT, 'label': 'Official - MOSS-Image-SFT'}]
     # Qwen 2.1 : PAS de base officielle téléchargeable (pas de repo diffusers 2.1
     # vérifié) — '' = le build élu par le résolveur de génération, listé avec les
     # autres checkpoints locaux et leur verdict d'entraînabilité (l'int8_convrot
@@ -1116,6 +1161,10 @@ def dataset_train_base_info(dataset_id):
                     # qwen_image arch; base-info is the panel's one fetch, so the
                     # verdict rides here instead of capabilities.
                     'qwen21_supported': lt._aitoolkit_supports_qwen_image(),
+                    # Same story as anima_supported/qwen21_supported: an older
+                    # ai-toolkit has no moss_image arch (extension, upstream
+                    # 2026-10-16); base-info is the panel's one fetch.
+                    'moss_supported': lt._aitoolkit_supports_moss(),
                     # Une entrée par famille de TRAIN_TYPES, sans exception : c'est
                     # ce que le panneau lit pour peupler son sélecteur de base
                     # (test_every_family_gets_its_own_base_list).
@@ -1123,7 +1172,8 @@ def dataset_train_base_info(dataset_id):
                                       'krea': krea_bases, 'flux': flux_bases,
                                       'flux2klein': flux2klein_bases,
                                       'anima': anima_bases,
-                                      'qwen21': qwen21_bases}})
+                                      'qwen21': qwen21_bases,
+                                      'moss': moss_bases}})
 
 
 @bp.post('/dataset/<int:dataset_id>/train/settings')

@@ -221,6 +221,15 @@ _SCHEMA_ADDITIONS = (
     # NULL on older rows; readers coalesce with created_at.
     ('face_dataset_image', 'caption_changed_at', 'DATETIME'),
     ('face_dataset_image', 'fail_reason', 'TEXT'),
+    # 组内一致性 / 离群成因（无参考图数据集的评分维度）—— 新表 dataset_score_report
+    # 由 create_all 建，但这四列挂在**已存在**的表上，必须走这条 additive 路径。
+    ('face_dataset_image', 'cluster_sim', 'REAL'),
+    ('face_dataset_image', 'cluster_sim_max', 'REAL'),
+    ('face_dataset_image', 'identity_group', 'INTEGER'),
+    ('face_dataset_image', 'score_cause', 'VARCHAR(16)'),
+    ('face_dataset_image', 'face_det', 'REAL'),
+    ('face_dataset_image', 'face_bbox', 'REAL'),
+    ('face_dataset_image', 'dhash', 'VARCHAR(16)'),
     # Nature de l'échec ('refused' | 'empty' | 'error') pour compter les refus
     # fournisseur séparément des pannes. Les lignes existantes restent NULL :
     # elles gardent leur phrase, et les compteurs ne les rangent nulle part.

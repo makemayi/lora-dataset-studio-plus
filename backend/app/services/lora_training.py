@@ -629,7 +629,7 @@ def _loras_root():
 # accessors AND for the multi-root read helpers below.
 _FAMILY_SUBDIR = {'zimage': 'z image', 'sdxl': 'sdxl', 'krea': 'krea',
                   'flux': 'flux', 'flux2klein': 'flux2klein', 'anima': 'anima',
-                  'qwen21': 'qwen'}
+                  'qwen21': 'qwen', 'moss': 'moss'}
 
 
 def _lora_dest_dir_zimage():
@@ -660,6 +660,10 @@ def _lora_dest_dir_flux2klein():
 
 def _lora_dest_dir_anima():
     return os.path.join(_loras_root(), 'anima')
+
+
+def _lora_dest_dir_moss():
+    return os.path.join(_loras_root(), 'moss')
 
 
 def _lora_family_dirs(fam: str) -> list[str]:
@@ -845,6 +849,39 @@ def _aitoolkit_supports_anima() -> bool:
     return False
 
 
+def _aitoolkit_supports_moss() -> bool:
+    """L'ai-toolkit installé connaît-il MOSS-Image ? Même enjeu CRITIQUE que
+    _aitoolkit_supports_krea : l'arch 'moss_image' est une EXTENSION
+    (extensions_built_in/diffusion_models/moss_image, upstream 2026-10-16), pas
+    une arch cœur — un ai-toolkit antérieur ne la connaît pas et get_model_class
+    retomberait SILENCIEUSEMENT sur le loader SD legacy → LoRA corrompu. On
+    exige l'arch EXACTE `arch = "moss_image"` (la chaîne émise par
+    _build_job_config_moss), jamais la sous-chaîne 'moss' (faux positif).
+    Lecture fraîche : un `git pull` du mainteneur passe la détection à True
+    sans restart. ⚠️ Cette garde vérifie la PRÉSENCE de l'arch, PAS la version
+    de diffusers : MOSS exige diffusers ≥ 0.38 (pipeline custom) — un checkout
+    à jour avec un venv ancien lèvera un ImportError au chargement (même angle
+    mort que krea2/flux2_klein/anima)."""
+    root = cfg.aitoolkit_path('dir')
+    if not root:
+        return False
+    ext_root = root / 'extensions_built_in'
+    if not ext_root.is_dir():
+        return False
+    pat = re.compile(r'arch\s*=\s*[\'"]moss_image[\'"]')
+    for dp, _dn, files in os.walk(str(ext_root)):
+        for fn in files:
+            if not fn.endswith('.py'):
+                continue
+            try:
+                with open(os.path.join(dp, fn), encoding='utf-8', errors='ignore') as fh:
+                    if pat.search(fh.read()):
+                        return True
+            except OSError:
+                continue
+    return False
+
+
 def _aitoolkit_supports_qwen_image() -> bool:
     """Does the installed ai-toolkit know the QWEN-IMAGE 2.1 arch? Same CRITICAL
     stakes as _aitoolkit_supports_krea (read its comment): without a match,
@@ -933,6 +970,8 @@ def _lora_dest_dir(ds, family=None) -> str:
         return str(_lora_dest_dir_flux2klein())
     if fam == 'anima':
         return str(_lora_dest_dir_anima())
+    if fam == 'moss':
+        return str(_lora_dest_dir_moss())
     return str(_lora_dest_dir_zimage())
 
 
@@ -994,12 +1033,12 @@ def _sdxl_base_path(base_model: str) -> str:
 # distinguished from a ComfyUI-relative base name (SDXL whitelist basename,
 # Z-Image merge value) purely by being ABSOLUTE — those are never absolute. Only
 # the families below expose it; Z-Image keeps its own conversion path untouched.
-CUSTOM_WEIGHTS_FAMILIES = ('sdxl', 'krea', 'flux', 'flux2klein', 'qwen21')
+CUSTOM_WEIGHTS_FAMILIES = ('sdxl', 'krea', 'flux', 'flux2klein', 'qwen21', 'moss')
 # SDXL is the ONLY family where ai-toolkit honours a top-level vae_path /
 # te_name_or_path override (stable_diffusion_model.py). Every other family
 # bundles its TE/VAE (Z-Image extras_name_or_path, Klein's hardcoded MISTRAL_PATH
 # → a silent no-op) so exposing them there would lie — strict per-family whitelist.
-VAE_TE_OVERRIDE_FAMILIES = ('sdxl',)
+VAE_TE_OVERRIDE_FAMILIES = ('sdxl', 'moss')   # moss : l'extension lit te_name_or_path/vae_path (run vérifiée : trio convrot local)
 
 
 def _is_custom_weights(value) -> bool:
@@ -1008,7 +1047,17 @@ def _is_custom_weights(value) -> bool:
     return bool(value) and os.path.isabs(str(value))
 
 
-def assert_trainable_base_file(path) -> dict:
+def _is_moss_convrot_export(report) -> bool:
+    """A MOSS-Image int8 convrot repack (Comfy-Org layout: `.comfy_quant` +
+    `.weight_scale` siblings over I8 weights). Unlike other structured exports
+    it IS trainable: the moss_image extension fuses those keys itself
+    (transformer.py fuse_split_quantized_keys) and trains on it with
+    qtype convrot8 — the verified local jcl001 run loads exactly this file."""
+    return ('.comfy_quant' in (report.get('signals') or [])
+            and 'I8' in (report.get('dtype_counts') or {}))
+
+
+def assert_trainable_base_file(path, family=None) -> dict:
     """Refuse a base the trainer CANNOT LOAD — and only that one — at selection.
 
     The community publishes fp8/int8 repacks of every popular base (~10 GB
@@ -1040,6 +1089,8 @@ def assert_trainable_base_file(path) -> dict:
     from . import model_integrity
     report = model_integrity.quantization_report(path)
     if not report.get('trainable_as_base', True):
+        if family == 'moss' and _is_moss_convrot_export(report):
+            return report
         raise ValueError(model_integrity.QUANT_REFUSAL)
     return report
 
@@ -1096,6 +1147,11 @@ def _detect_safetensors_arch(keys) -> str | None:
         return 'sdxl'
     if has('cond_stage_model.'):
         return 'sd15'
+    # MOSS-Image DiT (Comfy layout, 42-layer single stream):
+    # 'video_head_modulation' / 'shared_block_modulation' are unique to it
+    # (verified against extensions_built_in/diffusion_models/moss_image/src/transformer.py).
+    if has('video_head_modulation.') or has('shared_block_modulation.'):
+        return 'moss_image'
     # Krea2 SingleStreamDiT MMDiT: 'txtfusion' is unique to it.
     if has('txtfusion.'):
         return 'krea2'
@@ -1118,7 +1174,8 @@ def _detect_safetensors_arch(keys) -> str | None:
 # Verdict = FAMILY key ('zimage'|'sdxl'|'krea'|'flux'|'flux2klein'|'qwen21') or None
 # (undetectable → callers MUST NOT block; the guarantee is simply absent).
 _LORA_ARCH_LABEL = {'zimage': 'Z-Image', 'sdxl': 'SDXL', 'krea': 'Krea 2',
-                    'flux': 'FLUX.1', 'flux2klein': 'FLUX.2 Klein', 'qwen21': 'Qwen 2.1'}
+                    'flux': 'FLUX.1', 'flux2klein': 'FLUX.2 Klein', 'qwen21': 'Qwen 2.1',
+                    'moss': 'MOSS-Image'}
 # Key-namespace GROUP: two families in the SAME group share the tensor namespace,
 # so a wrong file loads its keys (a version mismatch then fails LOUDLY on a shape
 # error, not silently). Different groups = disjoint names = SILENT drop = the
@@ -1126,7 +1183,7 @@ _LORA_ARCH_LABEL = {'zimage': 'Z-Image', 'sdxl': 'SDXL', 'krea': 'Krea 2',
 # so they're one group (a name-only sniff can't tell them apart anyway).
 _LORA_ARCH_NAMESPACE = {'zimage': 'zimage', 'sdxl': 'sdxl', 'krea': 'krea',
                         'flux': 'flux', 'flux2klein': 'flux', 'anima': 'anima',
-                        'qwen21': 'qwen_image_2'}
+                        'qwen21': 'qwen_image_2', 'moss': 'moss'}
 
 
 def _family_from_base_model_version(value) -> str | None:
@@ -1142,6 +1199,8 @@ def _family_from_base_model_version(value) -> str | None:
     v = str(value or '').strip().lower()
     if not v:
         return None
+    if 'moss_image' in v:                # MossImageModel.get_base_model_version() → 'moss_image'
+        return 'moss'
     if 'anima' in v:                     # AnimaModel.get_base_model_version() → 'anima'
         return 'anima'
     if 'qwen_image_2' in v:              # QwenImage2Model.get_base_model_version() → 'qwen_image_2'
@@ -1156,6 +1215,17 @@ def _family_from_base_model_version(value) -> str | None:
         return 'krea'
     if v.startswith(('sdxl', 'sd_xl')):
         return 'sdxl'
+    return None
+
+
+def _family_from_modelspec_architecture(value) -> str | None:
+    """Map a `modelspec.architecture` stamp to a FAMILY key. Fizgig writes
+    'MOSS-Image/lora' with kohya-style key names (`lora_unet_layers_*`), which
+    the key sniff below would otherwise read as SDXL and refuse to deploy under
+    loras/moss. Only stamps verified on a real file are mapped."""
+    v = str(value or '').strip().lower()
+    if v.startswith('moss-image'):
+        return 'moss'
     return None
 
 
@@ -1201,6 +1271,11 @@ def _lora_arch_from_keys(keys) -> str | None:
     if has('diffusion_model.llm_adapter.') or has('adaln_modulation_self_attn') \
             or (has('diffusion_model.blocks.') and has('self_attn.q_proj')):
         return 'anima'
+    # MOSS-Image BEFORE the generic zimage 'layers.' check: its Comfy keys also
+    # use 'diffusion_model.layers.*' (self.layers), but the modulation heads are
+    # unique to it (src/transformer.py).
+    if has('video_head_modulation.') or has('shared_block_modulation.'):
+        return 'moss'
     if has('diffusion_model.layers.'):
         return 'zimage'
     return None
@@ -1231,6 +1306,8 @@ def detect_lora_arch(path) -> str | None:
         md, keys = _read_safetensors_header(path)
         fam = _family_from_base_model_version(md.get('ss_base_model_version'))
         if fam is None:
+            fam = _family_from_modelspec_architecture(md.get('modelspec.architecture'))
+        if fam is None:
             fam = _lora_arch_from_keys(keys)
     except ValueError:
         fam = None
@@ -1255,10 +1332,10 @@ def lora_arch_conflicts(detected, family) -> bool:
 
 _FAMILY_EXPECTED_ARCH = {'sdxl': 'sdxl', 'krea': 'krea2',
                          'flux': 'flux', 'flux2klein': 'flux', 'anima': 'anima',
-                         'qwen21': 'qwen_image_2'}
+                         'qwen21': 'qwen_image_2', 'moss': 'moss_image'}
 _ARCH_LABEL = {'sdxl': 'an SDXL', 'sd15': 'a Stable Diffusion 1.5',
                'flux': 'a FLUX', 'krea2': 'a Krea 2', 'anima': 'an Anima',
-               'qwen_image_2': 'a Qwen-Image 2.1'}
+               'qwen_image_2': 'a Qwen-Image 2.1', 'moss_image': 'a MOSS-Image'}
 # THE family display name — one map, used by preflight_custom_paths,
 # foreign_base_message, training_preflight and the run-summary lines.
 #
@@ -1271,7 +1348,7 @@ _ARCH_LABEL = {'sdxl': 'an SDXL', 'sd15': 'a Stable Diffusion 1.5',
 # behaviour of the surviving definition), and the lower one deleted.
 _FAMILY_LABEL = {'zimage': 'Z-Image', 'sdxl': 'SDXL', 'krea': 'Krea 2',
                  'flux': 'FLUX.1', 'flux2klein': 'FLUX.2 Klein', 'anima': 'Anima',
-                 'qwen21': 'Qwen 2.1'}
+                 'qwen21': 'Qwen 2.1', 'moss': 'MOSS-Image'}
 # Caption FORM each family is prompted with — the only input of the
 # MISMATCH_CAPTION guard (assert_trainable). Three values:
 #   'booru'  the model is tag-native (SDXL booru checkpoints, e.g. bigLove);
@@ -1316,7 +1393,7 @@ def preflight_custom_paths(family, weights=None, vae_path=None, te_path=None,
         # persisted before that guard shipped, or restored from a preset/share,
         # must not reach a rented GPU either. Hard, never confirmable — an
         # inference-only export cannot be trained on at any confidence level.
-        assert_trainable_base_file(weights)
+        assert_trainable_base_file(weights, family)
         keys = _safetensors_tensor_keys(weights)   # raises on unreadable header
         detected = _detect_safetensors_arch(keys)
         expected = _FAMILY_EXPECTED_ARCH.get(family)
@@ -1393,6 +1470,8 @@ def official_base_repo(ds, family=None, variant=_PERSISTED):
         return ZIMAGE_BASE if var == 'base' else ZIMAGE_TURBO_BASE
     if fam == 'anima':
         return ANIMA_BASE           # public, non-gated → the pre-rent HEAD returns 200
+    if fam == 'moss':
+        return MOSS_BASE            # public, non-gated (vendor OpenMOSS-Team)
     return None
 
 
@@ -1416,6 +1495,12 @@ FLUX2KLEIN_BASE_LABELS = {'4b': 'FLUX2-Klein-4B', '9b': 'FLUX2-Klein-9B'}
 # carry an empty tag → shared run folder → ai-toolkit cross-resume).
 ANIMA_BASE = 'circlestone-labs/Anima-Base-v1.0-Diffusers'
 ANIMA_BASE_LABEL = 'Anima-Base'
+# MOSS-Image (OpenMOSS, 2026-10-16, Apache-2.0). Base = reco OpenMOSS pour LoRA
+# (SFT = post-trainé ; les deux repos sont PUBLICS et non gated). TE Qwen3.5-9B
+# et VAE flux2 sont résolus par l'extension quand on ne les épingle pas.
+MOSS_BASE = 'OpenMOSS-Team/MOSS-Image-Base'
+MOSS_SFT = 'OpenMOSS-Team/MOSS-Image-SFT'
+MOSS_BASE_LABEL = 'MOSS-Image-Base'
 # Default preview negative for Anima, verbatim from ai-toolkit options.ts (PR #860,
 # entry 'anima'). The score_1..3 / "artist name" tags are the anime-model convention
 # the upstream UI ships — kept as the default so previews match ai-toolkit's own.
@@ -1515,7 +1600,7 @@ def assert_zimage_custom_recipe_confirmed(family, base_model, variant,
 # can only have been picked on another family (their builders gate on
 # `_is_custom_weights`, so they ignore it outright — see the `name_or_path` lines
 # in _build_job_config_krea/_flux/_flux2klein/_anima).
-_ABSOLUTE_BASE_FAMILIES = ('krea', 'flux', 'flux2klein', 'anima', 'qwen21')
+_ABSOLUTE_BASE_FAMILIES = ('krea', 'flux', 'flux2klein', 'anima', 'qwen21', 'moss')
 
 
 def foreign_base_reason(family, base_model) -> str | None:
@@ -1671,7 +1756,7 @@ def _valid_variants_for(family) -> tuple:
 #     `train_settings`). Absent/NULL → défaut family-aware issu de la recherche
 #     (cf. Research vault 2026-07-10). Toute valeur hors des listes autorisées
 #     retombe sur le défaut : on ne pousse JAMAIS une config invalide à ai-toolkit. ---
-_DEFAULT_RANK = {'zimage': 16, 'krea': 32, 'sdxl': 32, 'flux': 16, 'flux2klein': 16, 'anima': 32, 'qwen21': 32}   # Z-Image reste 16 (choix user) ; Krea/SDXL 32 ; Flux/FLUX.2 Klein 16 (défaut des exemples officiels) ; Anima 32 (defaultLinearRank ai-toolkit options.ts, PR #860) ; Qwen 32 (parité Krea/SDXL)
+_DEFAULT_RANK = {'zimage': 16, 'krea': 32, 'sdxl': 32, 'flux': 16, 'flux2klein': 16, 'anima': 32, 'qwen21': 32, 'moss': 32}   # moss 32/32 : run locale vérifiée (jcl001), pas extrapolé   # Z-Image reste 16 (choix user) ; Krea/SDXL 32 ; Flux/FLUX.2 Klein 16 (défaut des exemples officiels) ; Anima 32 (defaultLinearRank ai-toolkit options.ts, PR #860) ; Qwen 32 (parité Krea/SDXL)
 # FLUX.2 Klein STYLE only : linear 128 (+ Conv2d 64) — la recette dominante du sweep
 # Calvin Herbst (64 runs, fév. 2026) ET l'exemple de training officiel BFL, tous deux
 # sur les dims 128/64/64/32 (ratio 4:2:2:1). Les AUTRES kinds Klein gardent 16.
@@ -1691,6 +1776,15 @@ _SAVE_CHOICES = (250, 500, 1000)
 _DROPOUT_CHOICES = (0.05, 0.1, 0.15, 0.2, 0.3)          # LoRA network dropout ; absent = off
 _ALPHA_CHOICES = (1, 2, 4, 8, 16, 24, 32, 48, 64)       # alpha découplé du rank ; absent = dérivé
 _TIMESTEP_TYPE_CHOICES = ('sigmoid', 'linear', 'weighted', 'shift')  # pondération flowmatch ; SDXL le désactive
+# 'moss' : distribution de bruit du pré-entraînement MOSS-Image (rapport technique ; patch
+# local de toolkit/samplers/custom_flowmatch_sampler.py). MOSS seulement — local-only, donc
+# jamais envoyé à l'ai-toolkit figé du pod.
+_MOSS_TIMESTEP_TYPE = 'moss'
+
+
+def _timestep_choices_for(family) -> tuple:
+    return (_TIMESTEP_TYPE_CHOICES + (_MOSS_TIMESTEP_TYPE,)
+            if family == 'moss' else _TIMESTEP_TYPE_CHOICES)
 # ⚠️ `shift` sur Krea : l'entraîneur calcule le décalage depuis un nombre de
 # tokens qui suppose `unet.config.patch_size`, alors que le denoiser de Krea 2
 # nomme ce champ `patch` → patch_size retombe à 1 et le compte sort 4× trop
@@ -1702,7 +1796,7 @@ _TIMESTEP_TYPE_CHOICES = ('sigmoid', 'linear', 'weighted', 'shift')  # pondérat
 # les LoRA, image du pod (épinglée) pour le dense.
 _DEFAULT_TIMESTEP = {'zimage': 'sigmoid', 'krea': 'linear', 'flux': 'sigmoid',
                      'flux2klein': 'weighted', 'anima': 'weighted',
-                     'qwen21': 'weighted'}   # ce que « Auto » résout (sdxl : aucun) ; flux subject → sigmoid (reco ai-toolkit) ; flux2klein → weighted (défaut canonique options.ts, PAS sigmoid) ; anima → weighted (défaut options.ts PR #860) ; qwen21 → weighted (défaut options.ts qwen_image_2, lu sur upstream main)
+                     'qwen21': 'weighted', 'moss': 'sigmoid'}   # moss : la run vérifiée omettait la clé → défaut ai-toolkit 'sigmoid' (config_modules.py), émis explicitement   # ce que « Auto » résout (sdxl : aucun) ; flux subject → sigmoid (reco ai-toolkit) ; flux2klein → weighted (défaut canonique options.ts, PAS sigmoid) ; anima → weighted (défaut options.ts PR #860) ; qwen21 → weighted (défaut options.ts qwen_image_2, lu sur upstream main)
 # Batch 2 — optimiseur / planning du LR / batch effectif (valeurs VÉRIFIÉES dans
 # ai-toolkit : get_optimizer + toolkit/scheduler.py). CAME n'est PAS supporté.
 _OPTIMIZER_CHOICES = (
@@ -1728,7 +1822,9 @@ _EMA_CHOICES = (0.99, 0.999)
 _CONTENT_OR_STYLE_CHOICES = ('balanced', 'style', 'content')
 _DIFFERENTIAL_GUIDANCE_SCALE_RANGE = (0.1, 10.0)
 _LOSS_TYPE_CHOICES = ('mse',)
-_QTYPE_CHOICES = ('qfloat8', 'float8', 'int8')
+_QTYPE_CHOICES = ('qfloat8', 'float8', 'int8', 'convrot8')   # convrot8 : MOSS-Image seulement
+# (l'extension moss_image route model_config.qtype vers son loader convrot ;
+# "choisir convrot8 sur une AUTRE famille est refusé au build — cf. moss builder".)
 _SAVE_DTYPE_CHOICES = ('float16', 'bf16')
 _OFFLOADING_PERCENT_RANGE = (0.0, 1.0)
 
@@ -1770,6 +1866,9 @@ _DEFAULT_MEMORY_SAVING = {
     # Le levier reste offert dans l'AUTRE sens : une petite carte peut l'activer.
     'anima':      {'quantize': False, 'quantize_te': False, 'low_vram': False},
     'sdxl':       {'quantize': False, 'quantize_te': False, 'low_vram': False},
+    # moss 5B DiT + 9B TE : la run vérifiée quantise les DEUX (convrot int8) —
+    # bf16 complet ne tient pas sur le parc 24 Go avec le TE résident.
+    'moss':       {'quantize': True,  'quantize_te': True,  'low_vram': False},
 }
 
 # VRAM (Gio) qu'il faut RAISONNABLEMENT pour entraîner cette famille sans
@@ -1781,7 +1880,8 @@ _DEFAULT_MEMORY_SAVING = {
 #   qwen21 20B → ~40 + 6 (même formule)
 _UNQUANTISED_VRAM_GB = {'zimage': 18, 'krea': 30, 'flux': 30,
                         'flux2klein': 24, 'flux2klein_4b': 14,
-                        'anima': 10, 'sdxl': 10, 'qwen21': 46}
+                        'anima': 10, 'sdxl': 10, 'qwen21': 46,
+                        'moss': 34}   # 5B DiT (10) + 9B TE (18) + 6 marge
 
 
 def _memory_saving_defaults(ds, family) -> dict:
@@ -2023,6 +2123,21 @@ def clear_active_preset_settings(settings: dict) -> dict:
     return settings
 
 
+def _raw_setting(ds, key, default=None):
+    """Read `key` from the RAW `train_settings` JSON, bypassing the preset-scope
+    inert view `_train_settings` returns when the stored scope belongs to another
+    family (a krea preset must not resurrect moss/one-off choices, but an explicit
+    "previews off" must not be silently dropped either)."""
+    raw = getattr(ds, 'train_settings', None)
+    if not raw:
+        return default
+    try:
+        d = json.loads(raw)
+    except (ValueError, TypeError):
+        return default
+    return d.get(key, default) if isinstance(d, dict) else default
+
+
 def _train_settings(ds) -> dict:
     """Parse le blob JSON `train_settings` en dict (jamais lève ; {} si absent/cassé)."""
     raw = getattr(ds, 'train_settings', None)
@@ -2213,7 +2328,7 @@ def _timestep_type_eff(ds, default: str) -> str:
     """Pondération des timesteps : override la valeur family-default si l'utilisateur en
     a choisi une valide (gardé à l'enum ai-toolkit ; inconnu → le défaut)."""
     t = _train_settings(ds).get('timestep_type')
-    return t if t in _TIMESTEP_TYPE_CHOICES else default
+    return t if t in _timestep_choices_for(_train_type(ds)) else default
 
 
 def _optimizer_eff(ds) -> str:
@@ -2953,8 +3068,8 @@ def effective_train_settings(ds, family=None) -> dict:
             'alpha_choices': list(_ALPHA_CHOICES),
             'dropout': s.get('dropout') if s.get('dropout') in _DROPOUT_CHOICES else None,
             'dropout_choices': list(_DROPOUT_CHOICES),
-            'timestep_type': s.get('timestep_type') if s.get('timestep_type') in _TIMESTEP_TYPE_CHOICES else None,
-            'timestep_type_choices': list(_TIMESTEP_TYPE_CHOICES),
+            'timestep_type': s.get('timestep_type') if s.get('timestep_type') in _timestep_choices_for(fam) else None,
+            'timestep_type_choices': list(_timestep_choices_for(fam)),
             'default_timestep_type': _DEFAULT_TIMESTEP.get(fam),   # None pour sdxl → contrôle masqué
             'timestep_type_supported': fam != 'sdxl',
             'optimizer': s.get('optimizer') if s.get('optimizer') in _OPTIMIZER_CHOICES else None,   # None → adamw8bit
@@ -3211,7 +3326,7 @@ def _training_selection_candidate(ds, patch: dict, requested_mode) -> dict:
         # Custom weights only: a ComfyUI-relative name addresses a catalog entry
         # this app installed, an absolute path is a file the user picked.
         if _is_custom_weights(base_model):
-            assert_trainable_base_file(base_model)
+            assert_trainable_base_file(base_model, family)
     if 'variant' in patch:
         raw_variant = patch.get('variant')
         if not isinstance(raw_variant, str) or not raw_variant.strip():
@@ -3461,10 +3576,11 @@ def update_train_settings(user_id, dataset_id, patch: dict, *, _settings=None) -
         v = patch['timestep_type']
         if v in (None, 'auto', ''):
             cur.pop('timestep_type', None)                 # auto → défaut family-aware
-        elif v in _TIMESTEP_TYPE_CHOICES:
+        elif v in _timestep_choices_for(_train_type(ds)):
             cur['timestep_type'] = v
         else:
-            raise ValueError(f'timestep_type must be one of {_TIMESTEP_TYPE_CHOICES} (or auto)')
+            raise ValueError(f'timestep_type must be one of '
+                             f'{_timestep_choices_for(_train_type(ds))} (or auto)')
     if 'optimizer' in patch:
         v = patch['optimizer']
         if v in (None, 'auto', '', 'adamw8bit'):
@@ -4363,6 +4479,21 @@ BUILTIN_TRAIN_PRESETS = [
                        'from options.ts; probe every 250 steps.',
         'settings': _character_preset_settings(32, 32, timestep_type='weighted'),
     },
+    # MOSS-Image (OpenMOSS, 2026-10-16): values PORTED from a verified local run
+    # (jcl001: 40-img character, batch 1, adamw8bit, lr 2e-4, bf16, resolution
+    # 768+1024, TE frozen) — rank 32/32, sigmoid timesteps (the run's ai-toolkit
+    # default, emitted explicitly). Probe every 250 steps.
+    {
+        'id': 'builtin-character-moss',
+        'name': 'MOSS-Image · Character',
+        'train_type': 'moss',
+        'dataset_kind': 'character',
+        'variants': [],
+        'builtin': True,
+        'description': 'Ported from a verified local MOSS-Image run: rank 32/32, '
+                       'sigmoid timesteps, 8-bit AdamW — probe every 250 steps.',
+        'settings': _character_preset_settings(32, 32, timestep_type='sigmoid'),
+    },
     # Qwen 2.1 (Wave 3): rank 32 (Krea/SDXL parity) with half alpha, weighted
     # timesteps per the arch's options.ts default. No published 2.1 recipe yet —
     # extrapolated, and labelled as such.
@@ -4486,6 +4617,19 @@ BUILTIN_TRAIN_PRESETS = [
                        "from ai-toolkit's rank-32 default with half alpha 16 "
                        'and weighted timesteps, 500-step probes.',
         'settings': _concept_preset_settings(32, 16, timestep_type='weighted'),
+    },
+    # MOSS-Image concept: no concept-specific study — the verified character run's
+    # rank 32 with half alpha 16, sigmoid timesteps, extrapolated to concepts.
+    {
+        'id': 'builtin-concept-moss',
+        'name': 'MOSS-Image · Concept',
+        'train_type': 'moss',
+        'dataset_kind': 'concept',
+        'variants': [],
+        'builtin': True,
+        'description': 'Extrapolated from the verified MOSS-Image character run: '
+                       'rank 32 with alpha 16, sigmoid timesteps, 500-step probes.',
+        'settings': _concept_preset_settings(32, 16, timestep_type='sigmoid'),
     },
     # Legacy generic Style alias. The API hides it from GET and resolves its ID
     # to a family-specific built-in at apply time. Keep the raw entry only for
@@ -4633,6 +4777,11 @@ def _dest_base_tag(ds, base_model=_PERSISTED, family=None,
     # isole le run et le LoRA déployé.
     if not tag and fam == 'anima':
         tag = _base_tag_for(ANIMA_BASE_LABEL)
+    # MOSS-Image : même garde — la Base officielle donne un tag vide qui
+    # télescoperait un run Z-Image officiel du même trigger. Le tag
+    # `_MOSS-Image-Base` isole le run et le LoRA déployé.
+    if not tag and fam == 'moss':
+        tag = _base_tag_for(MOSS_BASE_LABEL)
     return tag + _custom_combo_hash(ds, base_model, family)
 
 
@@ -5422,6 +5571,12 @@ def build_job_config(ds, dataset_folder: str, steps: int = 3000, training_folder
         _apply_slider_overrides(ds, cfg_['config']['process'][0], 'anima')
         _apply_dual_captions(ds, cfg_['config']['process'][0], dataset_folder)
         return cfg_
+    if _train_type(ds) == 'moss':
+        cfg_ = _build_job_config_moss(ds, dataset_folder, steps, training_folder=training_folder)
+        _apply_style_overrides(ds, cfg_['config']['process'][0], 'moss')
+        _apply_slider_overrides(ds, cfg_['config']['process'][0], 'moss')
+        _apply_dual_captions(ds, cfg_['config']['process'][0], dataset_folder)
+        return cfg_
     trigger = _safe_trigger(ds)
     base_model = getattr(ds, 'train_base_model', None)
     recipe = zimage_training_recipe(getattr(ds, 'train_variant', None), base_model)
@@ -6033,6 +6188,128 @@ def _build_job_config_anima(ds, dataset_folder: str, steps: int, training_folder
                     'sample_every': _sample_every(ds),
                     'guidance_scale': 4,
                     'sample_steps': 25,
+                    'prompts': _sample_prompts(ds, trigger),
+                },
+            }],
+        },
+    }
+
+
+def _build_job_config_moss(ds, dataset_folder: str, steps: int, training_folder=None) -> dict:
+    """Job-config ai-toolkit pour MOSS-Image (arch='moss_image', OpenMOSS 2026-10-16).
+
+    Valeurs PORTÉES d'une run locale VÉRIFIÉE (jcl001_moss_image_bs4,
+    F:\\ai-toolkit\\output — 40-img character LoRA) : rank 32/alpha 32, bf16,
+    adamw8bit, lr 2e-4, resolution [768,1024], cache latents + text embeddings, TE
+    gelé (reco officielle : « keep the text encoder frozen »), preview CFG 3 / 25
+    steps / 832x1216 / négatif vide. **Gradient checkpointing reste OBLIGATOIRE**
+    ici (batch 1, mais les activations ne tiennent pas) — voir le commentaire dans
+    le bloc `train`.
+    timestep_type ABSENT de cette run → défaut ai-toolkit 'sigmoid'
+    (config_modules.py:557) — émis explicitement pour que le levier UI reste
+    fonctionnel. Quantisation : la run tourne sur un trio convrot int8 local
+    (quantize true, qtype convrot8) → défaut famille quantize+qtype convrot8
+    (l'extension moss route model_config.qtype vers son loader convrot).
+    Base OFFICIELLE = MOSS-Image-Base (reco OpenMOSS pour LoRA ; le SFT reste
+    sélectionnable explicitement — les deux repos publics, TE/VAE résolus par
+    l'extension quand ils ne sont pas épinglés).
+
+    ⚠️ arch 'moss_image' = EXTENSION (extensions_built_in/diffusion_models/
+    moss_image), PAS une arch cœur → garde de version obligatoire
+    (_aitoolkit_supports_moss) sinon get_model_class retombe en silence sur le
+    loader SD legacy (LoRA corrompu)."""
+    trigger = _safe_trigger(ds)
+    _mrank = _lora_rank(ds, 'moss')   # défaut 32 = la run vérifiée ; alpha dérivé = rank
+    _mbase = getattr(ds, 'train_base_model', None)
+    if _is_custom_weights(_mbase):
+        _mname = _mbase
+    elif _mbase == MOSS_SFT:          # pick SFT explicite (repo id) → il passe tel quel
+        _mname = MOSS_SFT
+    else:
+        _mname = MOSS_BASE
+    model = {'arch': 'moss_image', 'name_or_path': _mname,
+             **_model_memory_block(ds, 'moss'),
+             # CFG negative branch skips DiT block 22 (zero-based) — upstream SLG
+             # default, pinned explicitly so it stays paired with the LoRA
+             # exclusion below (ai-toolkit ui.tsx MOSS preset).
+             'model_kwargs': {'uncond_skip_layers': [22]}}
+    s_ = _train_settings(ds)
+    # qtype par défaut de la famille = convrot8 (la run vérifiée) sauf choix explicite.
+    if not s_.get('qtype'):
+        model['qtype'] = 'convrot8'
+    if model.get('quantize_te') and not s_.get('qtype_te'):
+        model['qtype_te'] = 'convrot8'
+    # Trio local épingle (le patron de la run vérifiée) : DiT + TE + VAE fichiers.
+    _mte = getattr(ds, 'train_te_path', None)
+    _mvae = getattr(ds, 'train_vae_path', None)
+    if _mte:
+        model['te_name_or_path'] = _mte
+    if _mvae:
+        model['vae_path'] = _mvae
+    return {
+        'job': 'extension',
+        'config': {
+            'name': f'lora_{trigger}',
+            'process': [{
+                'type': 'sd_trainer',
+                'training_folder': (training_folder if training_folder
+                                    else str(_run_root(ds))),
+                'device': 'cuda:0',
+                'trigger_word': trigger,
+                # LoRA kept OFF block 22 so the skipped-block CFG contrast stays
+                # the base model's (ai-toolkit ui.tsx MOSS preset, paired with
+                # model_kwargs.uncond_skip_layers).
+                'network': {**_network_block(ds, _mrank, 'moss'),
+                            'network_kwargs': {'ignore_if_contains': ['layers.22.']}},
+                'save': {'dtype': _save_dtype_eff(ds), 'save_every': _save_every(ds),
+                         'max_step_saves_to_keep': _max_step_saves(ds)},
+                'datasets': [{
+                    'folder_path': dataset_folder,
+                    'caption_ext': 'txt',
+                    'caption_dropout_rate': 0.05,
+                    'cache_latents_to_disk': True,
+                    **_dataset_cache_text_embeddings(ds, default=True),
+                    'resolution': _train_res(ds),
+                    **_mask_fields(dataset_folder),
+                }],
+                'train': {
+                    'batch_size': 1,
+                    'steps': steps,
+                    'gradient_accumulation': _grad_accum(ds),
+                    'train_unet': True,
+                    'train_text_encoder': False,
+                    # 3090 24G 实测：关掉梯度检查点后，768/1024 桶的激活值就会溢出显存
+                    # （Windows 不报 OOM，而是换页到共享内存：GPU 100%、步数不动），
+                    # 所以必须开启。
+                    'gradient_checkpointing': True,
+                    # sample_every 0 = previews OFF (the documented meaning of 0 in
+                    # set_train_settings). ai-toolkit honours it through
+                    # train.disable_sampling, which also skips the baseline sample
+                    # generated before step 1 (BaseSDTrainProcess L2476-2487).
+                    # Lu sur le JSON BRUT : `_train_settings` renvoie une vue inerte
+                    # (clés retirées) quand le dataset porte encore le scope d'un
+                    # preset d'une AUTRE famille — un preset krea ne doit pas
+                    # rallumer les previews d'une run moss.
+                    'disable_sampling': _raw_setting(ds, 'sample_every') == 0,
+                    'noise_scheduler': 'flowmatch',
+                    'timestep_type': _timestep_type_eff(ds, 'sigmoid'),  # défaut de la run vérifiée
+                    'optimizer': _optimizer_eff(ds),
+                    'lr': _lr_eff(ds),
+                    'dtype': 'bf16',
+                    **_train_serializer_fields(ds),
+                    **_content_or_style_fields(ds),
+                    **_lr_sched_fields(ds),
+                    **_ema_fields(ds),
+                },
+                'model': model,
+                'sample': {
+                    'sampler': 'flowmatch',
+                    'neg': '',
+                    'sample_every': _sample_every(ds),
+                    'guidance_scale': 3,
+                    'sample_steps': 25,
+                    'width': 832,
+                    'height': 1216,
                     'prompts': _sample_prompts(ds, trigger),
                 },
             }],
@@ -7241,6 +7518,25 @@ def _preset_steps_policy(ds) -> dict | None:
     }
 
 
+# MOSS-Image character: steps by EPOCHS (docs/guide/moss-lora-training.md) —
+# 60 epochs up to 30 images, 50 above, rounded UP to the 250-step save cadence
+# so the last checkpoint lands on the final step. batch is pinned to 1 for MOSS;
+# gradient accumulation folds `accum` images into one optimizer step.
+MOSS_EPOCHS_SMALL = 60
+MOSS_EPOCHS_LARGE = 50
+MOSS_EPOCHS_SPLIT = 30   # images <= this -> MOSS_EPOCHS_SMALL
+MOSS_STEP_ROUND = 250
+
+
+def _moss_epochs(n) -> int:
+    return MOSS_EPOCHS_SMALL if n <= MOSS_EPOCHS_SPLIT else MOSS_EPOCHS_LARGE
+
+
+def _moss_epoch_steps(ds, n) -> int:
+    raw = math.ceil(max(n, 1) * _moss_epochs(n) / max(_grad_accum(ds), 1))
+    return max(MOSS_STEP_ROUND, int(math.ceil(raw / MOSS_STEP_ROUND)) * MOSS_STEP_ROUND)
+
+
 def recommended_steps(dataset_id, train_type=None, variant=None) -> int:
     """Steps cibles selon le *type* de dataset — la recette suit le dataset, pas l'inverse.
 
@@ -7284,6 +7580,8 @@ def recommended_steps(dataset_id, train_type=None, variant=None) -> int:
     if ds is not None and fds.is_concept(ds):
         target = int(round(475 * math.sqrt(max(n, 1)), -2))
         return max(2000, min(12000, target))
+    if ds is not None and _train_type(ds) == 'moss':
+        return _moss_epoch_steps(ds, n)
     target = int(round(n * 120, -2))  # ~120 steps/image, arrondi à la centaine
     return max(1500, min(3500, target))
 
@@ -7342,6 +7640,14 @@ def recommended_steps_info(dataset_id, train_type=None, variant=None) -> dict:
                      f"clamped 2000–12000): the bigger the set, the fewer views per "
                      f"image (~{views}/img here), so the LoRA generalizes the concept "
                      f"instead of memorizing shots. Variety matters more than count.")
+    elif ds is not None and _train_type(ds) == 'moss':
+        accum = max(_grad_accum(ds), 1)
+        rationale = (f"MOSS-Image character — {n} images kept × {_moss_epochs(n)} "
+                     f"epochs ({MOSS_EPOCHS_SMALL} up to {MOSS_EPOCHS_SPLIT} images, "
+                     f"{MOSS_EPOCHS_LARGE} above)"
+                     + (f" ÷ {accum} grad accumulation" if accum > 1 else "")
+                     + f", rounded up to {MOSS_STEP_ROUND} so the last save lands "
+                     "on the final step.")
     else:
         rationale = (f"Character — {n} images kept. ~120 steps/image (clamped "
                      f"1500–3500): a small curated set seen many times locks the "
@@ -9607,23 +9913,33 @@ def stop_training(expected_dataset_id=None, expected_run_token=None,
 
         if pid_alive and queue_manager._get_system_state(
                 'training_trainer', None) == 'onetrainer':
-            # ASK, don't kill. OneTrainer's own cancel path writes the backup and
-            # saves the LoRA on a KeyboardInterrupt; `taskkill /F` never lets it
-            # run, which is how three stops in one afternoon each threw away a
-            # run that had trained for an hour. The kill below stays as the
-            # fallback for a child that will not go.
-            from . import onetrainer_service as _ots
-            if _ots.request_graceful_stop(pid):
-                if _ots.wait_for_exit(pid):
-                    _save_queue([])
-                    _clear_training_identity(ttl_seconds=None)
-                    return True
-                # Still saving. The run is ending and its watcher will finalise
-                # it; the GPU fence stays until the process is really gone, which
-                # is exactly what it is for.
-                logger.info('stop_training: OneTrainer pid %s is saving before it '
-                            'exits; leaving the fence to its watcher', pid)
-                return 'stopping'
+            # The marker is a hint, the process is the truth (see
+            # _is_onetrainer_process): a stale marker must not send an
+            # ai-toolkit run down the ask-and-wait lane.
+            onetrainer_process = _is_onetrainer_process(pid)
+            if onetrainer_process is False:
+                logger.warning(
+                    'stop_training: trainer state says onetrainer but pid %s is %r '
+                    '- killing it instead of asking',
+                    pid, _training_process_cmdline(pid)[:160])
+            else:
+                # ASK, don't kill. OneTrainer's own cancel path writes the backup and
+                # saves the LoRA on a KeyboardInterrupt; `taskkill /F` never lets it
+                # run, which is how three stops in one afternoon each threw away a
+                # run that had trained for an hour. The kill below stays as the
+                # fallback for a child that will not go.
+                from . import onetrainer_service as _ots
+                if _ots.request_graceful_stop(pid):
+                    if _ots.wait_for_exit(pid):
+                        _save_queue([])
+                        _clear_training_identity(ttl_seconds=None)
+                        return True
+                    # Still saving. The run is ending and its watcher will finalise
+                    # it; the GPU fence stays until the process is really gone, which
+                    # is exactly what it is for.
+                    logger.info('stop_training: OneTrainer pid %s is saving before it '
+                                'exits; leaving the fence to its watcher', pid)
+                    return 'stopping'
 
         if pid_alive:
             try:
@@ -10327,9 +10643,13 @@ def training_progress(user_id, dataset_id, base_model=_PERSISTED, family=None,
     except Exception:                                    # noqa: BLE001 — advisory
         logger.exception('training_progress: could not read the launch record')
         _rec = None
-    if _rec is not None and (getattr(_rec, 'trainer', None) or 'ai_toolkit') == 'onetrainer':
+    _rec_trainer = (getattr(_rec, 'trainer', None) or 'ai_toolkit') if _rec is not None else None
+    if _rec_trainer == 'onetrainer':
         from . import onetrainer_service as _ots
         return _ots.progress(user_id, dataset_id)
+    if _rec_trainer == 'fizgig':
+        from . import fizgig_service as _fzs
+        return _fzs.progress(user_id, dataset_id)
     cur_id = queue_manager._get_system_state('training_dataset_id', None)
     active = (bool(queue_manager._get_system_state('training_in_progress', False))
               and cur_id is not None and int(cur_id) == int(dataset_id)
@@ -10403,6 +10723,30 @@ def _clear_training_identity(ttl_seconds=None) -> None:
         'training_in_progress', False, ttl_seconds=ttl_seconds)
 
 
+def _training_process_cmdline(pid) -> str:
+    """Command line of the training process, or '' when it cannot be read."""
+    try:
+        import psutil
+        return ' '.join(psutil.Process(int(pid)).cmdline() or [])
+    except Exception:
+        return ''
+
+
+def _is_onetrainer_process(pid) -> bool | None:
+    """Does this PID really belong to OneTrainer? None = cannot tell.
+
+    Stop has two lanes with opposite endings (kill vs. ask-and-wait), and the
+    persisted marker alone was not enough: a stale `training_trainer` sent an
+    ai-toolkit run down the OneTrainer lane, where the stop was "accepted" and
+    nothing ever stopped. The process itself decides; an unreadable command line
+    keeps the historical behaviour (ask) so a real OneTrainer run is never killed.
+    """
+    cmd = _training_process_cmdline(pid).lower()
+    if not cmd:
+        return None
+    return 'onetrainer' in cmd
+
+
 def _training_process_create_time(pid) -> float | None:
     """Read a process birth time without ever treating an error as a death."""
     try:
@@ -10414,9 +10758,19 @@ def _training_process_create_time(pid) -> float | None:
 
 
 def _record_training_process_identity(pid) -> float | None:
-    """Persist a PID plus birth time so a later PID reuse cannot be killed."""
+    """Persist a PID plus birth time so a later PID reuse cannot be killed.
+
+    Also stamps WHOSE run this is. The lack of that stamp was a real bug: only
+    OneTrainer ever wrote `training_trainer`, so the key kept the value of the
+    last OneTrainer run and the NEXT ai-toolkit stop took the OneTrainer branch —
+    it "asked" an ai-toolkit process to save itself, the process ignored it, and
+    the run stayed on the GPU (observed 2026-10-18, had to be taskkilled by hand).
+    OneTrainer overwrites this with 'onetrainer' right after it calls us.
+    """
     queue_manager._set_system_state(
         'training_pid', int(pid), ttl_seconds=_TRAIN_STATE_TTL)
+    queue_manager._set_system_state(
+        'training_trainer', 'ai_toolkit', ttl_seconds=_TRAIN_STATE_TTL)
     birth_time = _training_process_create_time(pid)
     if birth_time is None:
         logger.error(

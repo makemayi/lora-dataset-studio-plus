@@ -8,7 +8,7 @@ const ACTIVE_STATUSES = new Set([
 
 export const CANVAS_FAMILY_LABELS = {
   zimage: 'Z-Image', krea: 'Krea 2', sdxl: 'SDXL',
-  flux: 'FLUX.1', flux2klein: 'FLUX.2 Klein', anima: 'Anima',
+  flux: 'FLUX.1', flux2klein: 'FLUX.2 Klein', anima: 'Anima', moss: 'MOSS-Image',
 };
 
 const FAMILY_ORDER = Object.keys(CANVAS_FAMILY_LABELS);

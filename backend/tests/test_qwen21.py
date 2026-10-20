@@ -241,6 +241,21 @@ def test_ref_resolution_is_clamped_snapped_and_capped_by_max_mp(q21):
     assert qeh.ref_resolution() <= qeh._max_output_resolution()
 
 
+def test_cfg_is_a_clamped_setting_and_reaches_the_sampler(q21):
+    """A turbo 2.1 build wants cfg 1 — cfg is a setting (default 4.0), clamped
+    1..10, and build_workflow takes it as an argument (the graph stays pure)."""
+    qeh, _base, config = q21
+    assert qeh._cfg() == 4.0
+    config.save_config({'qwen21': {'cfg': 1.0}})
+    assert qeh._cfg() == 1.0
+    config.save_config({'qwen21': {'cfg': 99}})
+    assert qeh._cfg() == 10.0
+    g = qeh.build_workflow('src.png', 'p', unet='u', clip='c', vae='v', seed=1,
+                           steps=6, cfg_scale=1.0)
+    ks = next(n for n in g.values() if n['class_type'] == 'KSampler')
+    assert ks['inputs']['cfg'] == 1.0 and ks['inputs']['steps'] == 6
+
+
 def test_generation_lora_preset_is_fail_closed(q21):
     qeh, base, config = q21
     assert qeh.resolve_generation_lora_preset('') == []
@@ -323,3 +338,128 @@ def test_pin_gap_naming(q21):
                      'configured': 'i_pinned_this.safetensors'}]
     with pytest.raises(qeh.Qwen21PinnedModelMissing):
         qeh.preflight()
+
+
+# --- sampling knobs (sampler / scheduler / viggle sigmas / shift / canvas) ------
+
+def _node(g, cls):
+    return next(n for n in g.values() if n['class_type'] == cls)
+
+
+def test_default_graph_is_the_stock_ksampler_on_the_encode_latent(q21):
+    qeh, _base, _config = q21
+    g = qeh.build_workflow('src.png', 'p', unet='u', clip='c', vae='v', seed=1)
+    ks = _node(g, 'KSampler')
+    assert ks['inputs']['sampler_name'] == 'euler' and ks['inputs']['scheduler'] == 'simple'
+    assert ks['inputs']['latent_image'] == ['6', 2] and ks['inputs']['model'] == ['1', 0]
+    assert not any(n['class_type'] in ('ModelSamplingFlux', 'EmptyLatentImage',
+                                       'SamplerCustomAdvanced', 'SeedVR2Preprocess')
+                   for n in g.values())
+
+
+def test_viggle_scheduler_samples_through_custom_advanced(q21):
+    qeh, _base, _config = q21
+    g = qeh.build_workflow('src.png', 'p', unet='u', clip='c', vae='v', seed=7,
+                           steps=6, cfg_scale=1.5, sampler='dpmpp_2m_sde_gpu_sharp',
+                           scheduler=qeh.VIGGLE_SCHEDULER,
+                           viggle={'method': 'beta', 'nodes': '1.0, 0.75, 0.5, 0.25, 0',
+                                   'alpha': 0.6, 'beta_param': 0.6, 'rho': 7.0, 'p': 2.0},
+                           output_size=(1024, 1536))
+    assert not any(n['class_type'] == 'KSampler' for n in g.values())
+    sca = _node(g, 'SamplerCustomAdvanced')['inputs']
+    sig = _node(g, qeh.VIGGLE_SIGMAS_NODE)['inputs']
+    assert sig['steps'] == 6 and sig['method'] == 'beta' and sig['latent'] == ['latent', 0]
+    assert _node(g, 'KSamplerSelect')['inputs']['sampler_name'] == 'dpmpp_2m_sde_gpu_sharp'
+    guider = _node(g, 'CFGGuider')['inputs']
+    assert guider['cfg'] == 1.5 and guider['negative'] == ['6', 1]
+    assert _node(g, 'RandomNoise')['inputs']['noise_seed'] == 7
+    assert sca['latent_image'] == ['latent', 0]
+    lat = _node(g, 'EmptyLatentImage')['inputs']
+    assert (lat['width'], lat['height']) == (1024, 1536)
+    assert _node(g, 'VAEDecode')['inputs']['samples'] == ['7', 0]
+
+
+def test_shift_mu_pins_model_sampling_flux_and_official_formula(q21):
+    qeh, _base, config = q21
+    g = qeh.build_workflow('src.png', 'p', unet='u', clip='c', vae='v', seed=1,
+                           shift_mu=0.9, sampler='res_2s', scheduler='beta57')
+    msf = _node(g, 'ModelSamplingFlux')['inputs']
+    assert msf['max_shift'] == msf['base_shift'] == 0.9
+    ks = _node(g, 'KSampler')['inputs']
+    assert ks['model'] == ['shift', 0] and ks['sampler_name'] == 'res_2s'
+    assert abs(qeh.official_shift_mu(1024, 1024) - 0.6935) < 1e-3
+    assert abs(qeh.official_shift_mu(2048, 2048) - 1.3129) < 1e-3
+    assert qeh._shift_setting() == ''
+    config.save_config({'qwen21': {'shift': 'official'}})
+    assert qeh._shift_setting() == 'official'
+    config.save_config({'qwen21': {'shift': '1.1'}})
+    assert qeh._shift_setting() == 1.1
+
+
+def test_sampler_names_are_shape_checked(q21):
+    qeh, _base, config = q21
+    config.save_config({'qwen21': {'sampler': 'res_2s', 'scheduler': 'Beta57'}})
+    assert qeh._sampler() == 'res_2s' and qeh._scheduler() == 'beta57'
+    config.save_config({'qwen21': {'sampler': 'bad name;', 'scheduler': ''}})
+    assert qeh._sampler() == 'euler' and qeh._scheduler() == 'simple'
+
+
+def test_canvas_follows_the_shot_aspect(q21):
+    qeh, _base, _config = q21
+    assert qeh.parse_aspect('2:3') == 2 / 3 and qeh.parse_aspect('junk') is None
+    w, h = qeh.output_size_for(1, 1, 3.0, ratio=2 / 3)
+    assert w % 32 == 0 and h % 32 == 0 and h > w
+    assert abs(w * h - 3_000_000) / 3_000_000 < 0.05
+
+
+def test_reference_restore_feeds_image_1(q21):
+    qeh, _base, _config = q21
+    g = qeh.build_workflow('src.png', 'p', unet='u', clip='c', vae='v', seed=1,
+                           ref_upscale={'dit': 'seedvr2.safetensors', 'vae': 'ema.safetensors',
+                                        'factor': 2.0, 'seed': 3})
+    assert g['6']['inputs']['images.image_1'] == ['up_post', 0]
+    assert g['up_resize']['inputs']['input'] == ['5', 0]
+    assert g['up_resize']['inputs']['resize_type.multiplier'] == 2.0
+    assert g['up_ks']['inputs']['steps'] == 1
+    assert g['up_post']['inputs']['color_correction_method'] == 'lab'
+
+
+def test_enqueue_uses_the_shot_aspect_and_official_shift(q21, monkeypatch, tmp_path):
+    qeh, _base, config = q21
+    from PIL import Image
+    src = tmp_path / 'ref.png'
+    Image.new('RGB', (800, 800)).save(src)            # square head-and-shoulders ref
+    config.save_config({'qwen21': {'output_mp': 2.0, 'shift': 'official',
+                                   'scheduler': 'simple'}})
+    monkeypatch.setattr(qeh, 'preflight', lambda: None)
+    monkeypatch.setattr(qeh, 'resolve_qwen21_unet', lambda *_: 'u')
+    monkeypatch.setattr(qeh, 'resolve_qwen21_text_encoder', lambda: 'c')
+    monkeypatch.setattr(qeh, 'resolve_qwen21_vae', lambda: 'v')
+    monkeypatch.setattr(qeh, '_comfy_input_dir', lambda: str(tmp_path))
+    monkeypatch.setattr(qeh.comfy_fs, 'ensure_input_usable', lambda d: d)
+    monkeypatch.setattr(qeh.comfy_fs, 'stage_input_image',
+                        lambda path, name, d: str(tmp_path / name))
+    captured = {}
+    monkeypatch.setattr(qeh.queue_manager, 'add_job',
+                        lambda **kw: captured.update(kw))
+    qeh.enqueue_qwen21_edit('1', 'ref.png', 'p', source_path=str(src), aspect_ratio='2:3')
+    g = captured['workflow_data']
+    lat = _node(g, 'EmptyLatentImage')['inputs']
+    assert lat['height'] > lat['width']                # portrait canvas from the card
+    mu = _node(g, 'ModelSamplingFlux')['inputs']['max_shift']
+    assert abs(mu - qeh.official_shift_mu(lat['width'], lat['height'])) < 1e-9
+    config.save_config({'qwen21': {'follow_shot_aspect': False, 'output_mp': 0}})
+    qeh.enqueue_qwen21_edit('1', 'ref.png', 'p', source_path=str(src), aspect_ratio='2:3')
+    g = captured['workflow_data']
+    assert not any(n['class_type'] == 'EmptyLatentImage' for n in g.values())
+
+
+def test_framing_aspect_setting_wins_over_the_card(q21):
+    qeh, _base, config = q21
+    assert qeh.shot_aspect('anything', 'body') == '9:16'      # shipped default
+    assert qeh.shot_aspect('anything', 'bust') == '3:4'
+    assert qeh.shot_aspect('anything', 'face') == '1:1'
+    config.save_config({'qwen21': {'aspect_by_framing': {'body': '', 'bust': '3:4',
+                                                         'face': '1:1', 'back': '9:16'}}})
+    from app.services.face_variations import aspect_for_label
+    assert qeh.shot_aspect('anything', 'body') == aspect_for_label('anything', 'body')

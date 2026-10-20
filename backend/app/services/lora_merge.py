@@ -256,7 +256,8 @@ KREA2_KEY_PATTERNS = frozenset({
 
 KNOWN_LAYOUTS = {'krea': KREA2_KEY_PATTERNS}
 FAMILY_LABELS = {'krea': 'Krea 2', 'zimage': 'Z-Image', 'sdxl': 'SDXL',
-                 'flux': 'FLUX.1', 'flux2klein': 'FLUX.2 Klein', 'anima': 'Anima'}
+                 'flux': 'FLUX.1', 'flux2klein': 'FLUX.2 Klein', 'anima': 'Anima',
+                 'moss': 'MOSS-Image'}
 
 _INDEX_SEGMENT = re.compile(r'(?<=\.)\d+(?=\.)')
 

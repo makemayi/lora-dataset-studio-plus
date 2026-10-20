@@ -340,6 +340,7 @@ def generate_variations_qwen21(user_id, dataset_id, variations, multiplier,
                             subject_type=subject_type_of(ds),
                             label=v.get('label') or ''),
                         generation_loras=run_loras,
+                        aspect_ratio=qeh.shot_aspect(v.get('label'), v.get('framing')),
                         extra_metadata={'is_dataset': True, 'dataset_id': dataset_id,
                                         'variation_label': v.get('label')})
                 except Exception:
@@ -1220,6 +1221,7 @@ def regenerate_image(user_id, image_id, lora_strength=None, prompt=None, app=Non
                 subject_type=subject_type_of(ds),
                 label=img.variation_label or ''),
             generation_loras=_qeh.resolve_generation_lora_preset(generation_lora_preset),
+            aspect_ratio=_qeh.shot_aspect(img.variation_label, img.framing),
             extra_metadata={'is_dataset': True, 'dataset_id': img.dataset_id,
                             'variation_label': img.variation_label})
     elif target == MINIMAX_H3_ENGINE:

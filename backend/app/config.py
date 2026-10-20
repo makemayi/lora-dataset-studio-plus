@@ -139,6 +139,11 @@ DEFAULTS = {
                    # value degrades to LORA at launch time rather than
                    # failing the whole run.
                    'peft_type': 'LORA'},
+    # Fizgig — third local training backend (MOSS-Image, Fizgig's Standard
+    # preset; see services/fizgig_service.py). Blank `dir` = unconfigured.
+    # `python` empty = <dir>/venv/Scripts/python.exe; `models_dir` empty =
+    # ComfyUI's models folder; `output_dir` empty = <dir>/output_loras/lds.
+    'fizgig': {'dir': '', 'python': '', 'models_dir': '', 'output_dir': ''},
     # `enabled` is the ENGINE CATALOG as well as the default selection: adding an
     # engine here is what makes it reach existing installs (see _merge_new_engines
     # and LEGACY_KNOWN_ENGINES below). `known` is not a setting — it is the ledger
@@ -846,11 +851,39 @@ DEFAULTS = {
         # preserved). Low = fast, softer likeness; high = stronger likeness,
         # more VRAM. Capped by max_output_mp below.
         'ref_resolution': 1024,
-        # Measured working profile: euler/simple, cfg 4.0, 30 steps. cfg and
-        # the sampler choice are pinned in code (qwen21_edit_helper), like
-        # Krea's pinned cfg 1.0 — 2.1 just wants the guidance Krea was
-        # distilled away from, plus a REAL negative prompt:
+        # Measured working profile for the stock base: euler/simple, cfg 4.0,
+        # 30 steps. Every sampling knob is a setting because a turbo/distilled
+        # 2.1 build (or a turbo LoRA) wants far fewer steps, a low cfg and its
+        # own sigma schedule — running one at 30 steps / cfg 4 is ~10x the work
+        # and over-cooks the image. 2.1 also takes a REAL negative (cfg > 1):
         'steps': 30,
+        'cfg': 4.0,
+        # Any sampler / scheduler ComfyUI lists (custom packs included).
+        # scheduler 'viggle_turbo' = the viggle_turbo.py custom node's
+        # ViggleTurboSigmasSelect (turbo-LoRA nodes resampled + the released
+        # dynamic resolution shift) through SamplerCustomAdvanced.
+        'sampler': 'euler',
+        'scheduler': 'simple',
+        'viggle_sigmas': {'method': 'beta', 'nodes': '1.0, 0.75, 0.5, 0.25, 0',
+                          'alpha': 0.6, 'beta_param': 0.6, 'rho': 7.0, 'p': 2.0},
+        # '' = ComfyUI's built-in mu 0.69 at every size; 'official' = the
+        # released dynamic shift for the output size (comfy issue #16447 —
+        # equal at ~1 MP, 0.9 at ~2 MP); a number = that mu.
+        'shift': '',
+        # 0 = output at the reference's size (ref_resolution). >0 = output
+        # canvas in megapixels, reference still encoded at ref_resolution:
+        # bigger faces in full-body shots (a ~100 px face gets redrawn).
+        'output_mp': 0,
+        # The output canvas takes the shot card's aspect (its framing), not the
+        # reference photo's — a "full body" prompt on a head-and-shoulders
+        # reference otherwise gets a canvas shaped for a portrait.
+        'follow_shot_aspect': True,
+        # 0 = off; >1 = restore the reference through SeedVR2 at that
+        # multiplier before encoding (needs the SeedVR2 lane's DiT + VAE).
+        'ref_upscale': 0,
+        # Canvas aspect per framing (W:H). A set value wins over the card's own
+        # aspect override; blank = the card's catalog aspect.
+        'aspect_by_framing': {'face': '1:1', 'bust': '3:4', 'body': '9:16', 'back': '9:16'},
         'negative_prompt': '',
         # Optional always-on generation LoRAs, as NAMED presets — same shape
         # and same contract as krea.generation_lora_presets (independent list;

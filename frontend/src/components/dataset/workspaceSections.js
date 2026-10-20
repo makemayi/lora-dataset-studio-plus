@@ -17,6 +17,9 @@ export const WORKSPACE_SECTIONS = [
       { id: 'reference', title: 'Reference photo', targetId: 'ds-add-reference', when: 'character' },
       { id: 'generate', title: 'Generate variations', targetId: 'ds-add-generate', when: 'character' },
       { id: 'import', title: 'Import photos', targetId: 'ds-add-import', when: 'always' },
+      // 体检与一键处置：分数在 generate 列里，但它是"该不该训"的判据，所以
+      // 在 Add images 的子导航里给一个入口，而不是藏进 Curation。
+      { id: 'score', title: 'Score', targetId: 'ds-score', when: 'always' },
     ] },
   { id: 'images', title: 'Images', icon: 'image', eyebrow: 'overview',
     description: 'Everything in the dataset — keep ✓ the good shots, reject ✕ the rest, edit a caption right on its tile.',

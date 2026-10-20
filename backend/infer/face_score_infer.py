@@ -84,6 +84,12 @@ def main() -> int:
     refs = [str(p) for p in (req.get("refs") or [])]
     images = [str(p) for p in (req.get("images") or [])]
     models_root = req.get("models_root") or None
+    # CLUSTER MODE (`cluster: true`) : aucune reference n'existe (dataset sans photo
+    # de reference). La consistance se mesure alors DANS le groupe : pour chaque
+    # image, la mediane de ses cosinus avec TOUTES LES AUTRES. Mesure 2026-10-18
+    # (4 datasets, 264 visages) : 0.74 sur un dataset dont la ref donne 0.81, 0.60
+    # sur un dataset large et varie -> le chiffre separe bien "tient ensemble" de
+    # "melange", et les images isolees ressortent (min 0.40).
     # EMPTY refs is a legitimate request, not a missing argument: the video
     # bank's person_mode 'person' gates on face PRESENCE/size/pose only, with
     # no identity to compare against. Detection-only pass: ref_ok True, no sim.
@@ -222,10 +228,21 @@ def main() -> int:
             float(sum(float(np.dot(emb, o)) for o in others) / len(others)), 4)
 
     results = {}
+    emb_by_path = {}                 # cluster 模式要用，主循环里顺手留下，避免二次推理
     for i, p in enumerate(images, 1):
         try:
             r = analyze(p); emb = r.pop("_emb", None)
-            if ref_embs and r["state"] in ("scorable", "extreme_pose") and emb is not None:
+            if emb is not None and r["state"] not in ("no_face", "unreadable", "error"):
+                emb_by_path[p] = emb
+            # 只要拿到 embedding 就给 sim —— `too_small` 以前被这里挡掉，是「有分但被丢掉」，
+            # 不是「算不出」。2026-10-18 实测（antelopev2 CPU，189 张）：
+            #   scorable     n=90  sim 0.49-0.99（均值 0.81）
+            #   too_small    n=80  sim 0.28-0.89（均值 0.71）← 0% 低于 0.2 可信线
+            #   extreme_pose n=19  sim 0.42-0.75（均值 0.57）
+            # 分布与 scorable 大幅重叠，所以给分是诚实的；`state` 保持原值，自动挑选
+            # （auto-triage）仍然只认 'scorable' —— 我们给的是一个数字，不是删图的许可。
+            if ref_embs and r["state"] not in ("no_face", "unreadable", "error") \
+                    and emb is not None:
                 sims = [float(np.dot(ref_emb, emb)) for _, ref_emb in ref_embs]
                 r["sim"] = round(max(sims), 4)
             results[p] = r
@@ -233,6 +250,67 @@ def main() -> int:
         except Exception as e:
             results[p] = {"state": "error", "error": str(e)}
             _log(f"[face] {i}/{len(images)} ERROR {e}")
+
+    if req.get("cluster"):
+        # 组内一致性：每张脸与「其它所有脸」的余弦中位数。故意用朴素 N×N
+        # （最大的数据集 309 张 → 9.5 万个 512 维点积，毫秒级），kdtree 只会多一
+        # 处可能出错的地方。embedding 在主循环里已经留下，这里不再跑第二次推理。
+        keys = [p for p in images if p in emb_by_path]
+        if len(keys) >= 3:
+            M = np.stack([emb_by_path[p] for p in keys])
+            S = M @ M.T
+            n = len(keys)
+            for idx, p in enumerate(keys):
+                others = np.delete(S[idx], idx)
+                med = float(np.median(others))
+                results[p]["sim"] = round(med, 4)
+                # 最近邻相似度：判断"这张是另一张的连拍"用（同一个人不同角度通常
+                # 0.6-0.85，同一瞬间的连拍 0.95+）
+                results[p]["sim_max"] = round(float(others.max()), 4)
+            # ── 身份分量：连通分量法判"一个人还是多个人" ─────────────────────
+            # 判据来自实测（ds43，87 张，用户确认是同一人）：真正同一人的集在
+            # 余弦 ≥0.35 时就会全部连成一片（外观漂移只会让边变细，不会断开），
+            # 而多人的集在同样阈值下会分裂成几个各自紧密、彼此 0.2-0.3 的分量。
+            IDENTITY_TH = 0.35
+            parent = list(range(n))
+
+            def _find(x):
+                while parent[x] != x:
+                    parent[x] = parent[parent[x]]
+                    x = parent[x]
+                return x
+
+            for a in range(n):
+                for b in range(a + 1, n):
+                    if float(S[a, b]) >= IDENTITY_TH:
+                        parent[_find(a)] = _find(b)
+            comp = {}
+            for idx in range(n):
+                comp.setdefault(_find(idx), []).append(idx)
+            ordered = sorted(comp.values(), key=len, reverse=True)
+            for gid, members in enumerate(ordered, 1):
+                for idx in members:
+                    results[keys[idx]]["identity_group"] = gid
+            identities = [{'group': gid, 'size': len(m)}
+                          for gid, m in enumerate(ordered, 1)]
+            # 多身份 = 除最大分量外，还有另一个 ≥3 张的分量
+            multi_identity = len([g for g in identities if g['size'] >= 3]) > 1
+            all_med = [results[p]["sim"] for p in keys]
+            med_all = float(np.median(all_med))
+            p10 = float(np.percentile(all_med, 10))
+            _log(f"[face] cluster: n={n} median={med_all} p10={p10}")
+            print(json.dumps({"ref_ok": True, "cluster": True, "n": n,
+                              "median": round(med_all, 4), "p10": round(p10, 4),
+                              "identities": identities,
+                              "multi_identity": multi_identity,
+                              "identity_threshold": IDENTITY_TH,
+                              "results": results, "refs": ref_report}))
+            return 0
+        print(json.dumps({"ref_ok": True, "cluster": True, "n": len(keys),
+                          "error": "not enough usable faces for a cluster score",
+                          "results": results, "refs": ref_report}))
+        return 0
+
     print(json.dumps({"ref_ok": True, "results": results, "refs": ref_report}))
     return 0
 

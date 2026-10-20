@@ -248,3 +248,56 @@ def check_reference_set(ref_path, extra_ref_paths=None, timeout: int | None = No
                 {'kind': 'ref_unusable',
                  'detail': data.get('error') or 'no usable face in the reference photos'})
     return {'floor': floor, 'compared': compared, 'refs': report}, None
+
+
+def score_cluster(image_paths, timeout: int | None = None, on_progress=None):
+    """Consistance SANS photo de reference : pour chaque image, la mediane de ses
+    cosinus avec toutes les autres du set (« a quel point ce visage tient avec le
+    reste »). Meme binaire, meme fenetre CPU que le scoring normal.
+
+    Mesure 2026-10-18 (264 visages, 4 datasets) : 0.74 sur un set dont la ref
+    donne 0.81 ; 0.60 sur un set large et varie ; les images isolees sortent a
+    0.40. C'est ce qui permet de noter les 17 datasets qui n'ont AUCUNE photo de
+    reference (`reference photo missing`).
+
+    Retourne ``({'n','median','p10','per_image':{path: sim}}, error|None)``.
+    """
+    image_paths = [p for p in (image_paths or []) if p and os.path.isfile(p)]
+    if len(image_paths) < 3:
+        return {}, {'kind': 'too_few',
+                    'detail': 'cluster scoring needs at least 3 images with a face'}
+    if not is_available():
+        return {}, {'kind': 'unavailable',
+                    'detail': 'face scoring is not installed (Quality tools step in Setup)'}
+    if timeout is None:
+        timeout = default_timeout(len(image_paths))
+    payload = json.dumps({"refs": [], "images": image_paths, "cluster": True,
+                          "models_root": cfg.get('face_scoring.models_root') or None})
+    try:
+        stdout, stderr_lines, returncode, timed_out = _run_scorer(
+            _scoring_python(), payload, timeout, on_progress)
+    except OSError as e:
+        return {}, {'kind': 'failed', 'detail': str(e)}
+    if timed_out:
+        return {}, {'kind': 'failed', 'detail': 'cluster scoring timed out'}
+    # stdout 是一整段字符串（不是行列表）—— 照抄 score_dataset_faces 的解析方式
+    line = next((ln for ln in reversed((stdout or '').splitlines())
+                 if ln.strip().startswith('{')), '')
+    if not line:
+        tail = _stderr_tail(stderr_lines)
+        return {}, {'kind': 'failed',
+                    'detail': tail or f'scorer produced no output (rc={returncode})'}
+    try:
+        data = json.loads(line)
+    except json.JSONDecodeError as e:
+        return {}, {'kind': 'failed', 'detail': f'unreadable scorer output: {e}'}
+    if data.get('error'):
+        return {}, {'kind': 'failed', 'detail': data['error']}
+    per_image = {p: {k: r.get(k) for k in ('sim', 'sim_max', 'det', 'bbox_frac', 'yaw',
+                                           'state', 'identity_group')}
+                 for p, r in (data.get('results') or {}).items()
+                 if isinstance(r, dict) and r.get('sim') is not None}
+    return {'n': data.get('n'), 'median': data.get('median'), 'p10': data.get('p10'),
+            'per_image': per_image,
+            'identities': data.get('identities') or [],
+            'multi_identity': bool(data.get('multi_identity'))}, None

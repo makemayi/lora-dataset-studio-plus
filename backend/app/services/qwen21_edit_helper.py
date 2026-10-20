@@ -484,16 +484,142 @@ def _steps():
     return int(_clamp(cfg.get('qwen21.steps'), 4, 60, 30.0))
 
 
+def _cfg():
+    return _clamp(cfg.get('qwen21.cfg'), 1.0, 10.0, QWEN21_CFG)
+
+
 def _negative_prompt():
     return str(cfg.get('qwen21.negative_prompt') or '')
 
 
-# cfg is pinned at 4.0 in code (the measured working profile for 2.1) and is
-# deliberately NOT a setting — same philosophy as Krea's pinned cfg 1.0, this
-# model just wants the guidance Krea was distilled away from.
+_NAME_CHARS = frozenset('abcdefghijklmnopqrstuvwxyz0123456789_')
+
+
+def _enum_name(key, default):
+    """A sampler / scheduler NAME from settings. Any value ComfyUI lists is legal
+    (custom packs such as RES4LYF register their own), so only the shape is
+    checked here; an unknown name is caught at queue time by the enum check
+    against /object_info, with a message naming it."""
+    v = str(cfg.get(key) or '').strip().lower()
+    return v if v and set(v) <= _NAME_CHARS else default
+
+
+def _sampler():
+    return _enum_name('qwen21.sampler', QWEN21_SAMPLER)
+
+
+def _scheduler():
+    return _enum_name('qwen21.scheduler', QWEN21_SCHEDULER)
+
+
+def official_shift_mu(width, height):
+    """mu of Qwen-Image 2.1's released scheduler config (dynamic shift:
+    base_shift 0.5 at 256 tokens, max_shift 0.9 at 8192, tokens = (W/16)*(H/16)).
+    ComfyUI pins 0.69 for every size (comfy issue #16447) — equal at ~1 MP,
+    0.9 at ~2 MP, 1.31 at ~4 MP."""
+    tokens = (int(width) // 16) * (int(height) // 16)
+    return 0.5 + 0.4 * (tokens - 256) / (8192 - 256)
+
+
+def _shift_setting():
+    """'' = ComfyUI's built-in 0.69; 'official' = the dynamic mu for the output
+    size; a number = that mu, fixed."""
+    raw = str(cfg.get('qwen21.shift') or '').strip().lower()
+    if raw in ('', 'default', 'comfy'):
+        return ''
+    if raw == 'official':
+        return 'official'
+    try:
+        return max(0.0, min(5.0, float(raw)))
+    except ValueError:
+        return ''
+
+
+def _viggle_sigmas():
+    s = cfg.get('qwen21.viggle_sigmas')
+    s = s if isinstance(s, dict) else {}
+    method = str(s.get('method') or 'beta').strip().lower()
+    return {'method': method if set(method) <= _NAME_CHARS else 'beta',
+            'nodes': str(s.get('nodes') or VIGGLE_DEFAULT_NODES),
+            'alpha': _clamp(s.get('alpha'), 0.05, 100.0, 0.6),
+            'beta_param': _clamp(s.get('beta_param'), 0.05, 100.0, 0.6),
+            'rho': _clamp(s.get('rho'), 1.0, 20.0, 7.0),
+            'p': _clamp(s.get('p'), 1.0, 5.0, 2.0)}
+
+
+def _ref_upscale_factor():
+    """0 = off. >1 = run the primary reference through SeedVR2 (one-step 7B
+    restore, the same core-node shape and files as the SeedVR2 upscale lane)
+    at that multiplier before it is encoded — a cleaner, sharper face for the
+    vision encoder and the reference latent."""
+    v = _clamp(cfg.get('qwen21.ref_upscale'), 0.0, 4.0, 0.0)
+    return v if v > 1.0 else 0.0
+
+
+def _output_mp():
+    """0 = sample on the encode node's latent (the reference's size at
+    ref_resolution). >0 = an output canvas of that many megapixels, in the
+    reference's aspect — the reference is still ENCODED at ref_resolution."""
+    return _clamp(cfg.get('qwen21.output_mp'), 0.0, 4.0, 0.0)
+
+
+def _follow_shot_aspect():
+    """True (default): the output canvas takes the SHOT CARD's aspect (its
+    framing — a full-body card is portrait, a wide card landscape) instead of the
+    reference photo's. Without it a head-and-shoulders reference forces its own
+    shape on a "full body" prompt and the model has to crop or squash the shot
+    it was asked for. The reference itself is still encoded at its own aspect."""
+    v = cfg.get('qwen21.follow_shot_aspect')
+    return True if v is None else bool(v)
+
+
+def parse_aspect(aspect):
+    """'W:H' -> W/H, or None for anything unusable (same bounds as Krea's)."""
+    if not isinstance(aspect, str) or ':' not in aspect:
+        return None
+    try:
+        aw, ah = (float(x.strip()) for x in aspect.split(':', 1))
+    except ValueError:
+        return None
+    if not (aw > 0 and ah > 0):
+        return None
+    ratio = aw / ah
+    return ratio if 1 / 32 <= ratio <= 32 else None
+
+
+def shot_aspect(label, framing):
+    """The canvas aspect for one shot: `qwen21.aspect_by_framing[framing]` when
+    set (it wins over a card's own aspect override, so every full-body card
+    renders at the same shape), else the catalog's aspect for that card."""
+    m = cfg.get('qwen21.aspect_by_framing')
+    if isinstance(m, dict) and parse_aspect(m.get(framing or '')):
+        return m[framing]
+    from .face_variations import aspect_for_label
+    return aspect_for_label(label, framing or 'face')
+
+
+def output_size_for(ref_w, ref_h, megapixels, ratio=None):
+    """(W, H) at `megapixels`, both multiples of 32, in `ratio` (W/H) when
+    given, else in the reference's aspect."""
+    ratio = float(ratio) if ratio else float(ref_w) / float(ref_h)
+    px = megapixels * 1_000_000
+    w = round((px * ratio) ** 0.5 / 32) * 32
+    h = round((px / ratio) ** 0.5 / 32) * 32
+    return max(256, int(w)), max(256, int(h))
+
+
+# Default cfg — the measured working profile for the stock 2.1 base. It is the
+# `qwen21.cfg` setting's fallback: turbo/distilled builds and turbo LoRAs want
+# 1.0 (no negative branch, half the work per step).
 QWEN21_CFG = 4.0
 QWEN21_SAMPLER = 'euler'
 QWEN21_SCHEDULER = 'simple'
+# `scheduler` value that swaps the scheduler for the viggle_turbo.py custom
+# node's ViggleTurboSigmasSelect (resampled distilled sigmas + the official
+# dynamic resolution shift) — the turbo LoRAs' own schedule.
+VIGGLE_SCHEDULER = 'viggle_turbo'
+VIGGLE_SIGMAS_NODE = 'ViggleTurboSigmasSelect'
+VIGGLE_DEFAULT_NODES = '1.0, 0.75, 0.5, 0.25, 0'
 
 MAX_OUTPUT_MP = 2.0
 
@@ -622,9 +748,11 @@ MAX_REFERENCE_SLOTS = 2
 
 
 def build_workflow(source_image, prompt, *, unet, clip, vae,
-                   seed, steps=None, resolution=None, negative_prompt=None,
+                   seed, steps=None, cfg_scale=None, resolution=None, negative_prompt=None,
                    character_loras=None, generation_loras=None,
-                   extra_source_image=None, filename_prefix='qwen21_edit'):
+                   extra_source_image=None, filename_prefix='qwen21_edit',
+                   sampler=None, scheduler=None, shift_mu=None, viggle=None,
+                   output_size=None, ref_upscale=None):
     """The ComfyUI API-format graph. Pure function of its arguments — no
     config read, no disk access — so a test can assert the exact wiring
     without a ComfyUI, and every loader value is one a resolver produced.
@@ -637,8 +765,17 @@ def build_workflow(source_image, prompt, *, unet, clip, vae,
     `generation_loras`: ordered [{file, strength}] rows chained AFTER those —
     both arrive pre-checked from enqueue_qwen21_edit, so this stays pure.
     `extra_source_image`: OPTIONAL ComfyUI input filename of a second
-    reference (a DIFFERENT subject — same contract as Krea's `_b` slot)."""
+    reference (a DIFFERENT subject — same contract as Krea's `_b` slot).
+
+    Sampling knobs (all optional; None keeps the stock KSampler graph):
+    `sampler` / `scheduler` names; `scheduler == VIGGLE_SCHEDULER` samples
+    through SamplerCustomAdvanced with ViggleTurboSigmasSelect(`viggle`
+    params); `shift_mu` pins the model's flux-type shift (mu) through
+    ModelSamplingFlux; `output_size` (W, H) samples on an empty latent of that size instead of
+    the encode node's latent. `ref_upscale` ({dit, vae, factor, seed}) restores
+    the primary reference through SeedVR2 before it is encoded."""
     steps = 30 if steps is None else max(4, int(steps))
+    cfg_scale = QWEN21_CFG if cfg_scale is None else float(cfg_scale)
     resolution = 1024 if resolution is None else int(resolution)
     negative_prompt = '' if negative_prompt is None else str(negative_prompt)
     character_loras = [(str(n).strip(), float(s)) for n, s in (character_loras or [])
@@ -678,10 +815,44 @@ def build_workflow(source_image, prompt, *, unet, clip, vae,
     # looked like the engine ignoring the reference photo entirely). The dotted
     # form is the only one whose dynamic-path expansion actually nests the
     # resolved tensor into the node's `images` dict.
+    ref_image = ['5', 0]
+    if ref_upscale:
+        u = ref_upscale
+        tiles = {'tile_size': 512, 'overlap': 128, 'temporal_size': 4096,
+                 'temporal_overlap': 8}
+        g.update({
+            'up_resize': {'class_type': 'ResizeImageMaskNode',
+                          'inputs': {'input': ['5', 0], 'resize_type': 'scale by multiplier',
+                                     'resize_type.multiplier': float(u['factor']),
+                                     'scale_method': 'lanczos'}},
+            'up_pre': {'class_type': 'SeedVR2Preprocess',
+                       'inputs': {'resized_images': ['up_resize', 0]}},
+            'up_vae': {'class_type': 'VAELoader', 'inputs': {'vae_name': u['vae']}},
+            'up_dit': {'class_type': 'UNETLoader',
+                       'inputs': {'unet_name': u['dit'], 'weight_dtype': 'default'}},
+            'up_enc': {'class_type': 'VAEEncodeTiled',
+                       'inputs': {'pixels': ['up_pre', 0], 'vae': ['up_vae', 0], **tiles}},
+            'up_cond': {'class_type': 'SeedVR2Conditioning',
+                        'inputs': {'model': ['up_dit', 0], 'vae_conditioning': ['up_enc', 0]}},
+            'up_ks': {'class_type': 'KSampler',
+                      'inputs': {'seed': int(u.get('seed', 0)), 'steps': 1, 'cfg': 1,
+                                 'sampler_name': 'euler', 'scheduler': 'simple',
+                                 'denoise': 1, 'model': ['up_dit', 0],
+                                 'positive': ['up_cond', 0], 'negative': ['up_cond', 1],
+                                 'latent_image': ['up_enc', 0]}},
+            'up_dec': {'class_type': 'VAEDecodeTiled',
+                       'inputs': {'samples': ['up_ks', 0], 'vae': ['up_vae', 0], **tiles}},
+            'up_post': {'class_type': 'SeedVR2PostProcessing',
+                        'inputs': {'images': ['up_dec', 0],
+                                   'original_resized_images': ['up_resize', 0],
+                                   'color_correction_method': 'lab'},
+                        '_meta': {'title': 'Reference restored by SeedVR2'}},
+        })
+        ref_image = ['up_post', 0]
     encode_inputs = {'clip': ['2', 0], 'prompt': prompt,
                      'negative_prompt': negative_prompt, 'vae': ['3', 0],
                      'resolution': resolution,
-                     'images.image_1': ['5', 0]}
+                     'images.image_1': ref_image}
     if extra_source_image:
         g['ref_b'] = {'class_type': 'LoadImage',
                       'inputs': {'image': extra_source_image},
@@ -690,13 +861,53 @@ def build_workflow(source_image, prompt, *, unet, clip, vae,
     g['6'] = {'class_type': 'TextEncodeQwenImage21',
               'inputs': encode_inputs,
               '_meta': {'title': 'Edit conditioning (positive / negative / latent)'}}
+    if shift_mu is not None:
+        # max == base pins mu regardless of size (ModelSamplingFlux interpolates
+        # between them by token count).
+        g['shift'] = {'class_type': 'ModelSamplingFlux',
+                      'inputs': {'model': model_out, 'max_shift': float(shift_mu),
+                                 'base_shift': float(shift_mu),
+                                 'width': 1024, 'height': 1024},
+                      '_meta': {'title': f'Shift mu {float(shift_mu):.3f}'}}
+        model_out = ['shift', 0]
+    latent = ['6', 2]
+    if output_size:
+        g['latent'] = {'class_type': 'EmptyLatentImage',
+                       'inputs': {'width': int(output_size[0]),
+                                  'height': int(output_size[1]), 'batch_size': 1},
+                       '_meta': {'title': 'Output canvas'}}
+        latent = ['latent', 0]
+    sampler = sampler or QWEN21_SAMPLER
+    scheduler = scheduler or QWEN21_SCHEDULER
+    if scheduler == VIGGLE_SCHEDULER:
+        v = dict(viggle or {})
+        g.update({
+            's_sigmas': {'class_type': VIGGLE_SIGMAS_NODE,
+                         'inputs': {'latent': latent, 'steps': steps, 'model': model_out,
+                                    'method': v.get('method', 'beta'),
+                                    'rho': v.get('rho', 7.0), 'p': v.get('p', 2.0),
+                                    'alpha': v.get('alpha', 0.6),
+                                    'beta_param': v.get('beta_param', 0.6),
+                                    'nodes': v.get('nodes', VIGGLE_DEFAULT_NODES)}},
+            's_sampler': {'class_type': 'KSamplerSelect',
+                          'inputs': {'sampler_name': sampler}},
+            's_noise': {'class_type': 'RandomNoise', 'inputs': {'noise_seed': seed}},
+            's_guider': {'class_type': 'CFGGuider',
+                         'inputs': {'model': model_out, 'positive': ['6', 0],
+                                    'negative': ['6', 1], 'cfg': cfg_scale}},
+            '7': {'class_type': 'SamplerCustomAdvanced',
+                  'inputs': {'noise': ['s_noise', 0], 'guider': ['s_guider', 0],
+                             'sampler': ['s_sampler', 0], 'sigmas': ['s_sigmas', 0],
+                             'latent_image': latent}},
+        })
+    else:
+        g['7'] = {'class_type': 'KSampler',
+                  'inputs': {'seed': seed, 'steps': steps, 'cfg': cfg_scale,
+                             'sampler_name': sampler,
+                             'scheduler': scheduler, 'denoise': 1.0,
+                             'model': model_out, 'positive': ['6', 0],
+                             'negative': ['6', 1], 'latent_image': latent}}
     g.update({
-        '7': {'class_type': 'KSampler',
-              'inputs': {'seed': seed, 'steps': steps, 'cfg': QWEN21_CFG,
-                         'sampler_name': QWEN21_SAMPLER,
-                         'scheduler': QWEN21_SCHEDULER, 'denoise': 1.0,
-                         'model': model_out, 'positive': ['6', 0],
-                         'negative': ['6', 1], 'latent_image': ['6', 2]}},
         '8': {'class_type': 'VAEDecode', 'inputs': {'samples': ['7', 0],
                                                     'vae': ['3', 0]}},
         '9': {'class_type': 'SaveImage',
@@ -714,7 +925,8 @@ def _comfy_input_dir() -> str:
 
 def enqueue_qwen21_edit(user_id, source_filename, edit_prompt, source_path=None,
                         extra_metadata=None, qwen21_model=None,
-                        generation_loras=None, extra_ref_paths=None):
+                        generation_loras=None, extra_ref_paths=None,
+                        aspect_ratio=None):
     """Copy the reference into ComfyUI's input folder, build the 2.1 graph
     against what is ACTUALLY installed, and enqueue it. Returns the app job_id.
 
@@ -757,10 +969,52 @@ def enqueue_qwen21_edit(user_id, source_filename, edit_prompt, source_path=None,
             candidate, f'qwen21_ref_b_{uid}_{len(extra_inputs)}.png', comfy_input_dir)
         extra_inputs.append(os.path.basename(staged_extra))
 
+    res = ref_resolution()
+    out_mp = _output_mp()
+    try:
+        from PIL import Image
+        with Image.open(source_path) as im:
+            ref_w, ref_h = im.size
+    except Exception:
+        ref_w = ref_h = None
+    shot_ratio = parse_aspect(aspect_ratio) if _follow_shot_aspect() else None
+    if shot_ratio:
+        output_size = output_size_for(1, 1, out_mp or res * res / 1_000_000,
+                                      ratio=shot_ratio)
+    else:
+        output_size = (output_size_for(ref_w, ref_h, out_mp)
+                       if out_mp > 0 and ref_w and ref_h else None)
+    if output_size:
+        out_w, out_h = output_size
+    elif ref_w and ref_h:
+        out_w, out_h = output_size_for(ref_w, ref_h, res * res / 1_000_000)
+    else:
+        out_w = out_h = res
+    shift = _shift_setting()
+    shift_mu = (official_shift_mu(out_w, out_h) if shift == 'official'
+                else (shift if shift != '' else None))
+    ref_upscale = None
+    factor = _ref_upscale_factor()
+    if factor:
+        from . import seedvr2_helper as _sv
+        dit, sv_vae = _sv.resolve_seedvr2_dit(), _sv.resolve_seedvr2_vae()
+        if not dit or not sv_vae:
+            raise Qwen21ModelsMissing(['seedvr2_dit' if not dit else 'seedvr2_vae'])
+        ref_upscale = {'dit': dit, 'vae': sv_vae, 'factor': factor,
+                       'seed': random.randint(0, 2 ** 32 - 1)}
+    scheduler = _scheduler()
+    if scheduler == VIGGLE_SCHEDULER:
+        from ..utils.comfyui import fetch_object_info_classes
+        available = fetch_object_info_classes()
+        if available is not None and VIGGLE_SIGMAS_NODE not in available:
+            raise Qwen21ModelsMissing([], [VIGGLE_SIGMAS_NODE])
     workflow = build_workflow(
         comfy_input, edit_prompt, unet=unet, clip=clip, vae=vae,
-        seed=random.randint(0, 2 ** 64 - 1), steps=_steps(),
-        resolution=ref_resolution(), negative_prompt=_negative_prompt(),
+        seed=random.randint(0, 2 ** 64 - 1), steps=_steps(), cfg_scale=_cfg(),
+        sampler=_sampler(), scheduler=scheduler, shift_mu=shift_mu,
+        viggle=_viggle_sigmas(),
+        output_size=output_size, ref_upscale=ref_upscale,
+        resolution=res, negative_prompt=_negative_prompt(),
         character_loras=_character_loras(),
         generation_loras=_existing_generation_lora_rows(generation_loras),
         extra_source_image=extra_inputs[0] if extra_inputs else None,

@@ -33,6 +33,8 @@ import {
 } from './engineSelection.js';
 import { kreaUnavailableReason, groundingDescription } from '../../utils/kreaEngine.js';
 import { qwen21UnavailableReason } from '../../utils/qwen21Engine.js';
+import ModelFilePicker, { useModelFiles } from '../settings/ModelFilePicker';
+import { useSamplerOptions, qwen21SchedulerChoices, VIGGLE_SCHEDULER } from '../../utils/comfySamplerOptions.js';
 import {
   KREA_REF_BOOST_MIN, KREA_REF_BOOST_MAX, KREA_REF_BOOST_STEP,
   KREA_IDENTITY_STRENGTH_MIN, KREA_IDENTITY_STRENGTH_MAX, KREA_IDENTITY_STRENGTH_STEP,
@@ -688,6 +690,19 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, a
   const [kreaIdentityStrength, setKreaIdentityStrength] = useState(null);
   const [kreaSteps, setKreaSteps] = useState(null);
   const [configDefaults, setConfigDefaults] = useState(null);
+  // Qwen 2.1: base model / steps / cfg are GLOBAL settings edited here (the
+  // regenerate path re-reads them), the LoRA preset is a per-run pick. Its
+  // presets share Krea's shape and clamps (qwen21_edit_helper copies them).
+  const [q21LoraPresets, setQ21LoraPresets] = useState([]);
+  const [q21LoraPresetName, setQ21LoraPresetName] = useState('');
+  const activeQ21LoraPreset = q21LoraPresets.find((p) => p.name === q21LoraPresetName) || null;
+  const [q21Base, setQ21Base] = useState('');
+  const [q21Steps, setQ21Steps] = useState(null);
+  const [q21Cfg, setQ21Cfg] = useState(null);
+  const [q21Sampler, setQ21Sampler] = useState('');
+  const [q21Scheduler, setQ21Scheduler] = useState('');
+  const samplerOpts = useSamplerOptions();
+  const q21ModelScan = useModelFiles('qwen21_model');
   useEffect(() => {
     let cancelled = false;
     apiFetch('/api/settings')
@@ -716,6 +731,15 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, a
           d.config?.klein?.default_generation_lora_preset, kleinPresets));
         setKreaLoraPresetName(resolveKreaDefaultPresetName(
           d.config?.krea?.default_generation_lora_preset, kreaPresets));
+        const q21Presets = sanitizeKreaGenerationLoraPresets(d.config?.qwen21?.generation_lora_presets);
+        setQ21LoraPresets(q21Presets);
+        setQ21LoraPresetName(resolveKreaDefaultPresetName(
+          d.config?.qwen21?.default_generation_lora_preset, q21Presets));
+        setQ21Base(d.config?.qwen21?.base_model || '');
+        setQ21Steps(d.config?.qwen21?.steps ?? null);
+        setQ21Cfg(d.config?.qwen21?.cfg ?? null);
+        setQ21Sampler(d.config?.qwen21?.sampler || 'euler');
+        setQ21Scheduler(d.config?.qwen21?.scheduler || 'simple');
         // Krea's four calibration dials, off the SAME payload — one fetch, one
         // truth. They are settings (they change the meaning of every shot in the
         // batch identically, so none is a per-run argument), and this panel both
@@ -746,6 +770,23 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, a
     });
   }
   useEffect(() => () => kreaDialSaver.current?.flush(), []);
+  const q21Saver = useRef(null);
+  if (q21Saver.current === null) {
+    q21Saver.current = createDialSaver((patch) => {
+      putJson('/api/settings', { config: { qwen21: { ...patch } } }).catch(() => {
+        toast.error('Could not save the Qwen 2.1 settings — check Settings › Image engines.');
+      });
+    });
+  }
+  useEffect(() => () => q21Saver.current?.flush(), []);
+  const q21StepsDefault = defaultValueAt(configDefaults, 'qwen21', 'steps') ?? 30;
+  const q21CfgDefault = defaultValueAt(configDefaults, 'qwen21', 'cfg') ?? 4;
+  const q21StepsValue = Math.min(60, Math.max(4, Math.round(Number(q21Steps ?? q21StepsDefault)) || q21StepsDefault));
+  const q21CfgValue = Math.min(10, Math.max(1, Number(q21Cfg ?? q21CfgDefault) || q21CfgDefault));
+  const setQ21Field = (field, value, setter) => {
+    setter(value);
+    q21Saver.current.schedule(field, value);
+  };
   // Keyed by CONFIG key so adding a dial is one line, not a branch to forget.
   const KREA_DIAL_SETTERS = {
     grounding_px: setKreaGrounding,
@@ -1128,7 +1169,10 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, a
     // the GPU-bound Klein one last); the server re-checks every batch.
     onGenerate(engineBatches(toGen, engines, engineMode), multiplier, klein, loraStrength,
       { ...generationLoraPresetPayload({ isKlein, presetName: loraPresetName, presets: loraPresets }),
-        ...kreaGenerationLoraPresetPayload({ isKrea, presetName: kreaLoraPresetName, presets: kreaLoraPresets }) });
+        ...kreaGenerationLoraPresetPayload({ isKrea, presetName: kreaLoraPresetName, presets: kreaLoraPresets }),
+        // Qwen 2.1's own key — same fail-closed rule (never send a dead name).
+        ...(isQwen21 && activeQ21LoraPreset && activeQ21LoraPreset.loras.length > 0
+          ? { qwen21_generation_lora_preset: activeQ21LoraPreset.name } : {}) });
   };
 
   return (
@@ -1649,6 +1693,118 @@ export default function VariationCatalog({ datasetId = null, onGenerate, busy, a
               <p className="text-content-subtle text-[0.625rem]">
                 Not applied by the 🔄 single-image regenerate, and only the model side is
                 patched (a LoRA's text-encoder weights are ignored here).
+              </p>
+            </div>
+          </div>
+        </details>
+      )}
+
+      {isQwen21 && q21Available && (
+        <details className="rounded-lg bg-surface open:pb-2">
+          <summary className="cursor-pointer select-none px-2.5 py-1.5 text-[0.75rem] text-content font-semibold">
+            🎛 Qwen 2.1 model &amp; LoRA
+            <span className="ml-2 font-normal text-content-subtle text-[0.625rem]">
+              {(q21Base || caps.qwen21?.base_resolved || 'auto').split(/[\\/]/).pop()}
+              {` · ${q21Sampler}/${q21Scheduler} · ${q21StepsValue} steps · cfg ${q21CfgValue}`}
+              {activeQ21LoraPreset && activeQ21LoraPreset.loras.length > 0
+                ? ` · LoRA preset: ${activeQ21LoraPreset.name}` : ''}
+            </span>
+          </summary>
+          <div className="px-2.5 pt-1 flex flex-col gap-2">
+            <p className="text-amber-700/90 text-[0.625rem]">
+              ⚠ Base model, steps and CFG save straight to your settings: they apply to <b>every</b> Qwen 2.1
+              run from now on (🔄 regenerate included) — the same values{' '}
+              <SettingsLink section="engines" focus="qwen21-engine-settings" tone="warning" className="text-[0.625rem]">
+                Settings › Image engines
+              </SettingsLink>{' '}shows.
+            </p>
+            <div className="flex flex-col gap-1">
+              <span className="text-content-muted text-[0.6875rem]">Base model</span>
+              <ModelFilePicker
+                id="q21-run-model"
+                ariaLabel="Qwen 2.1 base model file"
+                value={q21Base}
+                onChange={(v) => setQ21Field('base_model', v, setQ21Base)}
+                placeholder="auto — finds a Qwen-Image 2.1 build"
+                {...q21ModelScan}
+              />
+              {!q21Base && caps.qwen21?.base_resolved && (
+                <span className="font-mono text-[0.625rem] text-content-subtle">auto → {caps.qwen21.base_resolved}</span>
+              )}
+            </div>
+            <div className="flex flex-wrap items-center gap-3 text-content-muted text-[0.6875rem]">
+              <label className="flex items-center gap-1.5">
+                Steps
+                <input type="number" min={4} max={60} step={1} value={q21StepsValue}
+                  aria-label="Qwen 2.1 sampler steps"
+                  onChange={(e) => setQ21Field('steps', Number(e.target.value) || q21StepsDefault, setQ21Steps)}
+                  className="w-16 rounded-lg bg-surface-raised px-1.5 py-0.5 text-content text-[0.6875rem] focus:outline-none focus:ring-1 focus:ring-primary" />
+              </label>
+              <label className="flex items-center gap-1.5">
+                CFG
+                <input type="number" min={1} max={10} step={0.1} value={q21CfgValue}
+                  aria-label="Qwen 2.1 CFG"
+                  onChange={(e) => setQ21Field('cfg', Number(e.target.value) || q21CfgDefault, setQ21Cfg)}
+                  className="w-16 rounded-lg bg-surface-raised px-1.5 py-0.5 text-content text-[0.6875rem] focus:outline-none focus:ring-1 focus:ring-primary" />
+              </label>
+              <label className="flex items-center gap-1.5">
+                Sampler
+                <input list="q21-run-samplers" value={q21Sampler} aria-label="Qwen 2.1 sampler"
+                  onChange={(e) => setQ21Field('sampler', e.target.value.trim(), setQ21Sampler)}
+                  className="w-40 rounded-lg bg-surface-raised px-1.5 py-0.5 text-content text-[0.6875rem] focus:outline-none focus:ring-1 focus:ring-primary" />
+                <datalist id="q21-run-samplers">
+                  {samplerOpts.samplers.map((s) => <option key={s} value={s} />)}
+                </datalist>
+              </label>
+              <label className="flex items-center gap-1.5">
+                Scheduler
+                <input list="q21-run-schedulers" value={q21Scheduler} aria-label="Qwen 2.1 scheduler"
+                  onChange={(e) => setQ21Field('scheduler', e.target.value.trim(), setQ21Scheduler)}
+                  className="w-32 rounded-lg bg-surface-raised px-1.5 py-0.5 text-content text-[0.6875rem] focus:outline-none focus:ring-1 focus:ring-primary" />
+                <datalist id="q21-run-schedulers">
+                  {qwen21SchedulerChoices(samplerOpts.schedulers, samplerOpts.viggle, q21Scheduler)
+                    .map((s) => <option key={s} value={s} />)}
+                </datalist>
+              </label>
+              <span className="text-content-subtle text-[0.625rem] basis-full">
+                stock base: euler/simple · 30 steps · cfg 4 — turbo LoRA: {VIGGLE_SCHEDULER} sigmas · 6 steps · cfg 1–1.5.
+                Shift, output size, reference restore and the viggle curve live in Settings.
+              </span>
+            </div>
+            <div className="flex flex-col gap-1 pt-1 border-t border-white/10">
+              <label className="flex items-center gap-2 text-content-muted text-[0.6875rem]">
+                <span className="whitespace-nowrap">LoRA preset</span>
+                <select value={q21LoraPresetName} aria-label="Qwen 2.1 generation LoRA preset"
+                  onChange={(e) => setQ21LoraPresetName(e.target.value)}
+                  className="rounded-lg bg-surface-raised px-1.5 py-0.5 text-content text-[0.6875rem] focus:outline-none focus:ring-1 focus:ring-primary">
+                  <option value="">None</option>
+                  {q21LoraPresets.map((p) => (
+                    <option key={p.name} value={p.name}>{p.name} ({p.loras.length})</option>
+                  ))}
+                </select>
+                <span className="text-content-subtle text-[0.625rem]">applies to every shot of this run</span>
+              </label>
+              {q21LoraPresets.length === 0 && (
+                <p className="text-content-subtle text-[0.625rem]">
+                  No presets yet — build combinations of your Qwen 2.1 LoRA files in{' '}
+                  <SettingsLink section="engines" focus="qwen21-engine-settings" className="text-[0.625rem]">
+                    Settings › Image engines
+                  </SettingsLink>.
+                </p>
+              )}
+              {activeQ21LoraPreset && activeQ21LoraPreset.loras.length > 0 && (
+                <ol className="flex flex-col gap-0.5 text-[0.625rem] text-content-subtle">
+                  {activeQ21LoraPreset.loras.map((row, i) => (
+                    <li key={`${row.file}-${i}`} className="flex items-center gap-1.5" title={row.file}>
+                      <span className="text-content-muted">{i + 1}.</span>
+                      <span className="font-mono truncate max-w-[18rem]">{row.file.split(/[\\/]/).pop()}</span>
+                      <span>@ {row.strength.toFixed(2)}</span>
+                    </li>
+                  ))}
+                </ol>
+              )}
+              <p className="text-content-subtle text-[0.625rem]">
+                Not applied by the 🔄 single-image regenerate (it uses the Settings default preset).
               </p>
             </div>
           </div>

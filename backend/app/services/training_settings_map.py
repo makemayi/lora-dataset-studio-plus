@@ -40,7 +40,8 @@ from __future__ import annotations
 
 LANE_AITOOLKIT = 'ai_toolkit'
 LANE_ONETRAINER = 'onetrainer'
-LANES = (LANE_AITOOLKIT, LANE_ONETRAINER)
+LANE_FIZGIG = 'fizgig'
+LANES = (LANE_AITOOLKIT, LANE_ONETRAINER, LANE_FIZGIG)
 
 APPLIES = 'applies'
 PINNED = 'pinned'
@@ -168,6 +169,33 @@ SETTINGS: dict[str, dict] = {
     'save_dtype': {'group': 'memory',
                    'lanes': {LANE_AITOOLKIT: _A, LANE_ONETRAINER: _ABSENT}},
 }
+
+
+# The Fizgig lane runs Fizgig's MOSS-Image Standard preset (fizgig_service) and
+# reads four panel settings; verified against fizgig_service.effective_settings
+# + build_plan. Everything else is either pinned by the preset (said so, with
+# the reason) or has no Fizgig equivalent.
+_FIZGIG_PRESET = ('Fizgig’s MOSS-Image Standard preset sets this '
+                  '(see docs/guide/moss-lora-training.md).')
+_FIZGIG_LANE = {
+    'learning_rate': _A,
+    'rank': _A,
+    'alpha': _A,
+    'epochs': _A,
+    'resolution': _pinned('Trained at 1 MP buckets (992²), the Standard preset.'),
+    'batch_size': _pinned('Batch 1, the Standard preset.'),
+    'optimizer': _pinned('AdamW, the Standard preset.'),
+    'lr_scheduler': _pinned('Flat learning rate, the Standard preset.'),
+    'ema': _pinned('EMA 0.98 on checkpoints and previews, the Standard preset.'),
+    'timestep_type': _pinned('Fizgig’s clean-end share 30% (lownoise_pct=30), '
+                             'the Standard preset.'),
+    'quantize': _pinned('The int8 convrot Base from the ComfyUI models folder.'),
+    'quantize_te': _pinned('The text encoder is frozen and only cached once.'),
+    'cache_text_embeddings': _pinned('Always cached before training.'),
+}
+for _key, _entry in SETTINGS.items():
+    _entry['lanes'][LANE_FIZGIG] = _FIZGIG_LANE.get(_key, _ABSENT)
+del _key, _entry
 
 
 def status(setting_key, lane):

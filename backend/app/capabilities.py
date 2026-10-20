@@ -1733,6 +1733,15 @@ def autodetect() -> dict:
     }
 
 
+def _fizgig_configured() -> bool:
+    """Is the Fizgig lane usable? Same lightweight check as OneTrainer's."""
+    try:
+        from .services import fizgig_service as fzs
+        return bool(fzs.is_installed())
+    except Exception:                                    # noqa: BLE001 — advisory
+        return False
+
+
 def _onetrainer_configured() -> bool:
     """Is the OTHER local trainer usable? Same shape as the ai-toolkit half of
     `training_visible`: a folder set and its venv python present, no probing."""
@@ -2169,6 +2178,7 @@ def probe(force=False) -> dict:
         # run. (It is deliberately a lightweight is-it-configured check, like
         # the ai-toolkit half: no probing, no import.)
         'training_visible': (aitoolkit['ok'] or _onetrainer_configured()
+                             or _fizgig_configured()
                              or bool(cfg.secret('VAST_API_KEY'))),
         'studio_visible': comfy['ok'],
     }

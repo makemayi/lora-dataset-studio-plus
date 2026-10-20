@@ -3178,6 +3178,49 @@ never appear in the Test Studio grid, never count as a run in progress, and neve
 enter the 👍/👎 ranking of a checkpoint — a rating you give an *upscale* would
 otherwise be read as a vote for the checkpoint that did not produce it.
 
+## Score a dataset before you train it
+
+The **🩺 Score** panel in the Generate column answers one question: will this set
+train a LoRA that looks like one person? It shows a 0–100 total, six dimensions,
+and — more useful than either — what is wrong and which button fixes it.
+
+| Dimension | What it reads |
+|---|---|
+| Consistency | face similarity against your reference photo, or — when there is no reference — the median similarity of each face to every other face in the set |
+| Diversity | shot-type spread plus how many different scene words the captions carry |
+| Captions | coverage, length, and how many captions still describe the identity |
+| Quality | sharpness and noise from the local quality pass, plus watermarks |
+| Duplicates | byte-identical copies and near-duplicates (perceptual hash) |
+| Size | kept images against the recommended count |
+
+Two rules keep the number honest. A dimension the app never measured shows
+**未测** and is left out of the total instead of counting as zero, and when less
+than half the weight could be measured the server withholds the total entirely —
+"不足" is more useful than a 100 built from two dimensions.
+
+### What the outlier groups mean
+
+Outliers are grouped by cause, because the fixes are not the same thing:
+
+- **连拍重复 (duplicate)** — frames of one moment, found by perceptual hash. Near
+  duplicates are clustered and the sharpest frame of each cluster is kept.
+- **另一个身份 (other identity)** — only appears when the set really contains a
+  second person (two identity clusters of 3+ images each).
+- **外观漂移 (drift)** — one person whose look spans too much (different era,
+  styling, light, heavy filters). Not "someone else": pick a tighter subset.
+- **大侧脸 (profile)** and **检测勉强 (weak)** — keep them. Profiles and low light
+  are variety you want; the score is low because the face is hard to read, not
+  because the picture is useless.
+
+### Thresholds are data, not code
+
+Every button in the panel is a row of the `score_rule` table
+(`GET /api/score-rules`), and every threshold the app judges with is read from
+that table at call time. Change `cluster_min_floor` from 0.55 to 0.62 and the
+outlier count changes on the next read — no restart, no re-scoring. Marking only
+ever sets `status=reject` and a `fail_reason`; nothing is deleted until you run
+the purge rule, which skips locked images and asks for a dry run first.
+
 ## Tips that save runs
 
 - Trust the composition meter over your instinct — a set that "looks varied"

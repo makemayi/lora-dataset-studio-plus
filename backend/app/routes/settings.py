@@ -357,6 +357,25 @@ def comfy_model_files():
     return jsonify({'files': files, 'folder': folder})
 
 
+@bp.get('/comfy/sampler-options')
+def comfy_sampler_options():
+    """The sampler and scheduler names the connected ComfyUI accepts (custom
+    packs such as RES4LYF included), plus whether the viggle_turbo.py custom
+    sigma node is loaded. Read from the cached /object_info. ComfyUI offline
+    answers empty lists and ``reachable: false`` so the picker falls back to
+    free text instead of offering a guess."""
+    from ..utils.comfyui import fetch_object_info_enums, fetch_object_info_classes
+    enums = fetch_object_info_enums() or {}
+    classes = fetch_object_info_classes()
+    ks = enums.get('KSampler') or {}
+    samplers = set(ks.get('sampler_name') or ()) | set(
+        (enums.get('KSamplerSelect') or {}).get('sampler_name') or ())
+    return jsonify({'reachable': classes is not None,
+                    'samplers': sorted(samplers),
+                    'schedulers': sorted(ks.get('scheduler') or ()),
+                    'viggle_sigmas': bool(classes) and 'ViggleTurboSigmasSelect' in classes})
+
+
 @bp.get('/settings/topaz/status')
 def topaz_status():
     """Whether a usable tpai.exe is discoverable (config override first, then

@@ -24,6 +24,7 @@ _TRAIN_FAMILY_LABELS = {
     'flux': 'FLUX.1',
     'sdxl': 'SDXL',
     'anima': 'Anima',
+    'moss': 'MOSS-Image',
 }
 
 

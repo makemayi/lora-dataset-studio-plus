@@ -190,11 +190,14 @@ export function ProgressView({ prog, cloud = false, showLaunch = true,
              ai-toolkit begins writing" was shown for the WHOLE of every
              OneTrainer run — a sentence about the wrong program. */
           <p className="m-0 text-content-subtle text-[0.625rem]">
-            <span hidden={prog?.trainer === 'onetrainer'}>
+            <span hidden={prog?.trainer === 'onetrainer' || prog?.trainer === 'fizgig'}>
               Starting up… (the log appears once ai-toolkit begins writing)
             </span>
             <span hidden={prog?.trainer !== 'onetrainer'}>
               Starting up… (the log appears once OneTrainer begins writing)
+            </span>
+            <span hidden={prog?.trainer !== 'fizgig'}>
+              Fizgig: {prog?.stage || 'starting'}… (latents and text are cached before the first step)
             </span>
           </p>
         ) : null}

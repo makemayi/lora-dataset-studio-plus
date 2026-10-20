@@ -200,6 +200,12 @@ _QUICK_PRESET_MATRIX = {
     # it trains and deploys, no per-family style recipe yet).
     ('anima', 'character'): 'builtin-character-anima',
     ('anima', 'concept'): 'builtin-concept-anima',
+    # Qwen 2.1 (Wave 3) and MOSS-Image (ported from the verified local run)
+    # ship Character + Concept only, same scope as Anima.
+    ('qwen21', 'character'): 'builtin-character-qwen21',
+    ('qwen21', 'concept'): 'builtin-concept-qwen21',
+    ('moss', 'character'): 'builtin-character-moss',
+    ('moss', 'concept'): 'builtin-concept-moss',
 }
 
 _ORIGINAL_BUILTIN_IDS = set(_QUICK_PRESET_MATRIX.values()) | {
@@ -218,7 +224,7 @@ _APPROVED_BUILTIN_IDS = {
 def test_quick_preset_catalogue_covers_every_family_and_kind(client):
     listed = client.get('/api/train/presets').get_json()['presets']
     builtins = [p for p in listed if p.get('builtin')]
-    assert len(builtins) == 23
+    assert len(builtins) == 27
     assert {p['id'] for p in builtins} == (
         _ORIGINAL_BUILTIN_IDS | _APPROVED_BUILTIN_IDS)
     coverage = {}

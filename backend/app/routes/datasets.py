@@ -2436,6 +2436,172 @@ def dataset_images_batch(dataset_id):
     return jsonify(resp)
 
 
+@bp.get('/dataset/<int:dataset_id>/score')
+def dataset_score(dataset_id):
+    """数据集总评分（只读）。没测过的维度不参与、不扣分；实测权重 <50% 时不结总分。
+
+    Query: ?threshold=0.55 —— 同时决定 `low_similarity` 候选列表的阈值。"""
+    if not svc.get_dataset(LOCAL_USER, dataset_id):
+        return jsonify({'error': 'not found'}), 404
+    from ..services import dataset_score as ds_score
+    try:
+        threshold = float(request.args.get('threshold') or ds_score.DEFAULT_LOW_THRESHOLD)
+    except ValueError:
+        return jsonify({'error': 'invalid threshold'}), 400
+    try:
+        report = ds_score.score(LOCAL_USER, dataset_id)
+    except Exception as e:
+        return _map_error(e)
+    report['threshold'] = threshold
+    report['low_similarity'] = ds_score.low_similarity_ids(
+        ds_score._pool(dataset_id), threshold, request.args.get('scope') or 'generated')
+    report['low_similarity_count'] = len(report['low_similarity'])
+    report['delete_endpoint'] = '/api/dataset/%d/mark-low-similarity' % dataset_id
+    report['purge_endpoint'] = '/api/dataset/%d/purge' % dataset_id
+    return jsonify({'ok': True, **report})
+
+
+@bp.post('/dataset/<int:dataset_id>/score-cluster')
+def dataset_score_cluster(dataset_id):
+    """无参考图数据集的「组内一致性」打分（CPU，不占 GPU）。
+
+    每张图 = 它与**其它所有图**的余弦中位数；结果缓存在 data/cluster_scores/<id>.json，
+    图片一变（指纹不同）缓存自动失效。低于 max(0.55, 组内中位数-0.15) 的图算离群。
+    """
+    if not svc.get_dataset(LOCAL_USER, dataset_id):
+        return jsonify({'error': 'not found'}), 404
+    from ..services import dataset_score as ds_score
+    try:
+        res = ds_score.cluster_pass(LOCAL_USER, dataset_id)
+    except Exception as e:
+        return _map_error(e)
+    return jsonify({'ok': True, **res})
+
+
+# ── 判定规则（落库、可改、可点击执行）────────────────────────────────────────
+@bp.get('/score-rules')
+def score_rules_list():
+    """所有判定规则：阈值、权重、可点击执行的流程。首次访问自动播种默认值。"""
+    from ..services import score_rules as rules
+    return jsonify({'ok': True, 'rules': rules.all_rules()})
+
+
+@bp.post('/score-rules/<key>')
+def score_rules_update(key):
+    """改一条规则的参数或启停。Body: {params?: {...}, enabled?: bool}"""
+    from ..services import score_rules as rules
+    d = request.get_json(silent=True) or {}
+    try:
+        res = rules.update_rule(key, params=d.get('params'), enabled=d.get('enabled'))
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    return jsonify({'ok': True, **res})
+
+
+@bp.post('/dataset/<int:dataset_id>/apply-rule/<key>')
+def dataset_apply_rule(dataset_id, key):
+    """按表里的参数执行一条规则（这就是前端那个按钮）。
+
+    Body: {dry_run?: bool}（覆盖规则里的 dry_run，方便"先看再删"）
+    """
+    if not svc.get_dataset(LOCAL_USER, dataset_id):
+        return jsonify({'error': 'not found'}), 404
+    from ..services import score_rules as rules
+    d = request.get_json(silent=True) or {}
+    try:
+        res = rules.apply_rule(LOCAL_USER, dataset_id, key,
+                               dry_run=d.get('dry_run') if 'dry_run' in d else None)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        return _map_error(e)
+    return jsonify({'ok': True, 'rule': key, **res})
+
+
+@bp.post('/dataset/<int:dataset_id>/analyse-images')
+def dataset_analyse_images(dataset_id):
+    """本地技术指标分析：清晰度/噪点/均匀度 + 感知哈希 + 内容指纹（PIL，无模型、不下载）。
+
+    补的是总评分里 quality 与 duplicates 两维。Body: {limit?: N}
+    """
+    if not svc.get_dataset(LOCAL_USER, dataset_id):
+        return jsonify({'error': 'not found'}), 404
+    from ..services import dataset_score as ds_score
+    d = request.get_json(silent=True) or {}
+    try:
+        res = ds_score.analyse_images(LOCAL_USER, dataset_id,
+                                      limit=int(d['limit']) if d.get('limit') else None)
+    except Exception as e:
+        return _map_error(e)
+    return jsonify({'ok': True, **res})
+
+
+@bp.get('/dataset/<int:dataset_id>/outliers')
+def dataset_outliers(dataset_id):
+    """离群图，按成因分组：duplicate / profile / weak / different（各自带建议动作）。
+
+    Query: ?rebuild=1 强制重跑组内打分。没有缓存且缓存过期时自动跑一次（CPU，约 0.4s/张）。
+    """
+    if not svc.get_dataset(LOCAL_USER, dataset_id):
+        return jsonify({'error': 'not found'}), 404
+    from ..services import dataset_score as ds_score
+    try:
+        report = ds_score.outlier_report(
+            LOCAL_USER, dataset_id,
+            rebuild=str(request.args.get('rebuild') or '') in ('1', 'true', 'yes'))
+    except Exception as e:
+        return _map_error(e)
+    return jsonify({'ok': True, **report})
+
+
+@bp.post('/dataset/<int:dataset_id>/mark-low-similarity')
+def dataset_mark_low_similarity(dataset_id):
+    """给低相似度的图打上删除标识（status='reject'），**不删文件**。
+
+    Body: {threshold?: 0.55, scope?: 'generated'|'all', dry_run?: true}
+    抹了标识后，用已有的 POST /api/dataset/<id>/purge 一键删除（它跳过 is_locked）。"""
+    if not svc.get_dataset(LOCAL_USER, dataset_id):
+        return jsonify({'error': 'not found'}), 404
+    from ..services import dataset_score as ds_score
+    d = request.get_json(silent=True) or {}
+    try:
+        threshold = float(d.get('threshold') or ds_score.DEFAULT_LOW_THRESHOLD)
+    except (TypeError, ValueError):
+        return jsonify({'error': 'invalid threshold'}), 400
+    scope = (d.get('scope') or 'generated').lower()
+    if scope not in ('generated', 'all'):
+        return jsonify({'error': "scope must be 'generated' or 'all'"}), 400
+    try:
+        res = ds_score.mark_low_similarity(
+            LOCAL_USER, dataset_id, threshold=threshold, scope=scope,
+            dry_run=bool(d.get('dry_run', True)), force=bool(d.get('force', False)))
+    except Exception as e:
+        return _map_error(e)
+    return jsonify({'ok': True, **res})
+
+
+@bp.post('/dataset/<int:dataset_id>/mark-images')
+def dataset_mark_images(dataset_id):
+    """给指定的图片打删除标识（人工挑出来的：连拍冗余、带字幕截图……）。只写 reject，不删文件。
+
+    Body: {ids: [..], reason?: '...', dry_run?: true}
+    """
+    if not svc.get_dataset(LOCAL_USER, dataset_id):
+        return jsonify({'error': 'not found'}), 404
+    from ..services import dataset_score as ds_score
+    d = request.get_json(silent=True) or {}
+    ids = d.get('ids')
+    if not isinstance(ids, list) or not ids:
+        return jsonify({'error': "'ids' must be a non-empty list"}), 400
+    try:
+        res = ds_score.mark_images(LOCAL_USER, dataset_id, ids,
+                                   reason=(d.get('reason') or 'marked by user'),
+                                   dry_run=bool(d.get('dry_run', True)))
+    except Exception as e:
+        return _map_error(e)
+    return jsonify({'ok': True, **res})
+
+
 @bp.post('/dataset/<int:dataset_id>/purge')
 def dataset_purge(dataset_id):
     if not svc.get_dataset(LOCAL_USER, dataset_id):

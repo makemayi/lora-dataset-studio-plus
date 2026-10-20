@@ -582,6 +582,50 @@ export default function LocalToolsSection(props) {
             config={config} configDefaults={configDefaults} setField={setField} />
         </div>
       </Card>
+
+      <Card
+        title="Fizgig"
+        help="A third local training engine, MOSS-Image only for now — trains with Fizgig's MOSS-Image Standard preset. Point at the folder containing src/fizgig; its venv/ is detected automatically. Pick it per run from the training panel's MOSS-Image trainer selector."
+      >
+        <TextField
+          id="fizgig-dir"
+          label="Fizgig directory"
+          value={config.fizgig?.dir ?? ''}
+          onChange={(v) => setField('fizgig', 'dir', v)}
+          placeholder="E:\Fizgig"
+        />
+        <ResetToDefault label="Fizgig directory" section="fizgig" field="dir"
+          config={config} configDefaults={configDefaults} setField={setField} />
+        <TextField
+          id="fizgig-python"
+          label="Python interpreter (optional)"
+          value={config.fizgig?.python ?? ''}
+          onChange={(v) => setField('fizgig', 'python', v)}
+          placeholder="Auto — <Fizgig>/venv/Scripts/python.exe"
+          help="Full path to the python executable Fizgig should run with."
+        />
+        <ResetToDefault label="Python interpreter" section="fizgig" field="python"
+          config={config} configDefaults={configDefaults} setField={setField} />
+        <TextField
+          id="fizgig-models-dir"
+          label="Models folder (optional)"
+          value={config.fizgig?.models_dir ?? ''}
+          onChange={(v) => setField('fizgig', 'models_dir', v)}
+          placeholder="Auto — ComfyUI's models folder"
+          help="Where moss_image_base_int8_convrot, qwen3.5_9b_int8_convrot and flux2-vae_small are looked up (diffusion_models/, clip/, vae/)."
+        />
+        <ResetToDefault label="Models folder" section="fizgig" field="models_dir"
+          config={config} configDefaults={configDefaults} setField={setField} />
+        <TextField
+          id="fizgig-output-dir"
+          label="Runs folder (optional)"
+          value={config.fizgig?.output_dir ?? ''}
+          onChange={(v) => setField('fizgig', 'output_dir', v)}
+          placeholder="Auto — <Fizgig>/output_loras/lds"
+        />
+        <ResetToDefault label="Runs folder" section="fizgig" field="output_dir"
+          config={config} configDefaults={configDefaults} setField={setField} />
+      </Card>
     </div>
   )
 }

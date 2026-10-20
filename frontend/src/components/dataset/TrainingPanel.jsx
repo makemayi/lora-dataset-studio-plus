@@ -91,7 +91,7 @@ import {
 
 // Plancher dur / recommandé par famille — miroir de TRAIN_MIN_IMAGES côté serveur
 // (le preflight reste l'autorité ; ceci ne sert qu'à désactiver le bouton tôt).
-const TRAIN_MIN = { zimage: [12, 20], sdxl: [20, 30], krea: [15, 20], flux: [15, 20], flux2klein: [15, 20], anima: [15, 20], qwen21: [15, 20] };
+const TRAIN_MIN = { zimage: [12, 20], sdxl: [20, 30], krea: [15, 20], flux: [15, 20], flux2klein: [15, 20], anima: [15, 20], qwen21: [15, 20], moss: [15, 20] };
 // Slider mode: images are only a denoising substrate → mirror of
 // TRAIN_MIN_IMAGES_SLIDER server-side (the preflight stays authoritative).
 const TRAIN_MIN_SLIDER = [4, 12];
@@ -106,6 +106,7 @@ const SLIDER_FAMILY_NOTES = {
   flux: 'FLUX.1 — experimental: the slider method\'s own authors describe FLUX support as experimental.',
   sdxl: 'SDXL — experimental, ironically: sliders were born on SDXL, but ai-toolkit\'s modern slider trainer routes SDXL through its legacy model class — signature-compatible, unproven.',
   qwen21: 'Qwen 2.1 — untested: the concept_slider trainer has no per-arch gating, but nobody has verified this path on a Qwen-Image base yet.',
+  moss: 'MOSS-Image — untested: no one has verified the slider method on a MOSS-Image base yet.',
 };
 
 // « Custom weights… » : valeur-sentinelle de l'entrée du sélecteur de base qui
@@ -113,9 +114,9 @@ const SLIDER_FAMILY_NOTES = {
 // (miroir de CUSTOM_WEIGHTS_FAMILIES / VAE_TE_OVERRIDE_FAMILIES côté serveur ;
 // base-info les renvoie, ces défauts ne servent qu'avant son chargement).
 const CUSTOM_BASE_SENTINEL = '__custom_weights__';
-const DEFAULT_CUSTOM_FAMILIES = ['sdxl', 'krea', 'flux', 'flux2klein', 'qwen21'];
+const DEFAULT_CUSTOM_FAMILIES = ['sdxl', 'krea', 'flux', 'flux2klein', 'qwen21', 'moss'];
 const defaultTrainingVariant = (family) => (
-  family === 'krea' || family === 'qwen21' ? 'base' : family === 'flux2klein' ? '4b' : 'turbo'
+  family === 'krea' || family === 'qwen21' || family === 'moss' ? 'base' : family === 'flux2klein' ? '4b' : 'turbo'
 );
 // Absolute path (Windows drive, UNC, or POSIX) no longer MEANS « Custom
 // weights… » on its own: the Krea 2
@@ -151,7 +152,7 @@ function timeAgo(iso) {
 }
 
 // Family label for a checkpoint group header — mirrors CloudRunsPage's FAMILY_LABEL.
-const GROUP_FAMILY_LABEL = { zimage: 'Z-Image', krea: 'Krea 2', sdxl: 'SDXL', flux: 'FLUX.1', flux2klein: 'FLUX.2 Klein', anima: 'Anima', qwen21: 'Qwen 2.1' };
+const GROUP_FAMILY_LABEL = { zimage: 'Z-Image', krea: 'Krea 2', sdxl: 'SDXL', flux: 'FLUX.1', flux2klein: 'FLUX.2 Klein', anima: 'Anima', qwen21: 'Qwen 2.1', moss: 'MOSS-Image' };
 const groupFamLabel = (f) => GROUP_FAMILY_LABEL[f] || f || 'LoRA';
 
 const FULL_ARTIFACT_TONE = {
@@ -671,6 +672,11 @@ export function DenseBasePicker({
   );
 }
 
+// Display names of the local trainers (the `trainer` value sent at launch).
+const TRAINER_LABEL = { ai_toolkit: 'ai-toolkit', onetrainer: 'OneTrainer', fizgig: 'Fizgig' };
+// fizgig_service.DEFAULT_EPOCHS — Fizgig's MOSS-Image Standard preset.
+const FIZGIG_DEFAULT_EPOCHS = 70;
+
 /** Panneau d'entraînement LoRA : lance l'UI ai-toolkit (pause ComfyUI),
  * affiche l'état, liste les checkpoints et importe celui choisi.
  * Poll régulier : c'est ce poll qui fait avancer la file (fin du courant → suivant). */
@@ -788,13 +794,14 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
       .catch(() => { /* the panel just stays un-greyed */ });
     return () => { live = false; };
   }, []);
+  const laneName = TRAINER_LABEL[trainer] || 'ai-toolkit';
   const inertOnLane = useCallback((key) => {
     const entry = settingsMap?.lanes?.[trainer]?.[key];
     if (!entry || entry.state === 'applies') return null;
-    if (entry.state === 'pinned') return entry.why || `${trainer === 'onetrainer' ? 'OneTrainer' : 'ai-toolkit'} pins its own value for this setting.`;
+    if (entry.state === 'pinned') return entry.why || `${laneName} pins its own value for this setting.`;
     // 'absent': this lane has no concept of it either — still fails safe to inert.
-    return entry.why || `${trainer === 'onetrainer' ? 'OneTrainer' : 'ai-toolkit'} does not read this setting.`;
-  }, [trainer, settingsMap]);
+    return entry.why || `${laneName} does not read this setting.`;
+  }, [trainer, settingsMap, laneName]);
   const [trainingMode, setTrainingMode] = useState(TRAINING_MODE_LORA);
   const [trainingModeBusy, setTrainingModeBusy] = useState(false);
   const [trainingModeError, setTrainingModeError] = useState('');
@@ -915,7 +922,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
         // a normal dropdown pick and must stay in the dropdown.
         setCustomBase(customBaseMode(info.base || '', info, fam));
         const v = info.variant
-          || (fam === 'krea' || fam === 'qwen21' ? 'base' : fam === 'flux2klein' ? '4b' : 'turbo');
+          || (fam === 'krea' || fam === 'qwen21' || fam === 'moss' ? 'base' : fam === 'flux2klein' ? '4b' : 'turbo');
         const safeVariant = normalizeCheckpointVariant(fam, v);
         setVariant(safeVariant);
         setTrainType(info.train_type || 'zimage');
@@ -1001,13 +1008,13 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
     // 500 ms: long enough that a typed path is not one request per character,
     // short enough to land before the hand reaches the Train button.
     const timer = setTimeout(() => {
-      apiFetch(`/api/train/base-file-advisory?path=${encodeURIComponent(value)}`)
+      apiFetch(`/api/train/base-file-advisory?path=${encodeURIComponent(value)}&family=${encodeURIComponent(trainType || '')}`)
         // `for` is what makes a late answer harmless — see typedBaseNote.
         .then((d) => { if (alive) setTypedBaseAdvisory({ ...d, for: value }); })
         .catch(() => { if (alive) setTypedBaseAdvisory(null); });
     }, 500);
     return () => { alive = false; clearTimeout(timer); };
-  }, [base, customBase]);
+  }, [base, customBase, trainType]);
   const baseNote = baseSelectionNote(currentBases, base, typedBaseAdvisory);
   const baseNotTrainable = baseNote?.level === 'error';
   // Bloque l'entraînement si la base custom Z-Image n'est pas encore convertie,
@@ -1097,8 +1104,8 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
     // Z-Image → Turbo est le chemin sûr : base Turbo + adaptateur d'entraînement v2.
     // Cela empêche une variante Krea/Klein persistée de survivre en silence au switch.
     setVariant(nextVariant);
-    // OneTrainer is Krea 2-only in this slice — a stale pick must never apply
-    // silently to a family that doesn't support it.
+    // OneTrainer is Krea 2-only and Fizgig MOSS-only in this slice — a stale
+    // pick must never apply silently to a family that doesn't support it.
     setTrainer('ai_toolkit');
     let saved;
     try {
@@ -1163,7 +1170,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
   const advDropout = adv?.dropout ?? 0;
   const advDropoutChoices = adv?.dropout_choices ?? [0.05, 0.1, 0.15, 0.2, 0.3];
   const advTimestep = adv?.timestep_type ?? 'auto';
-  const advTimestepDefault = adv?.default_timestep_type ?? (trainType === 'krea' ? 'linear' : (trainType === 'flux2klein' || trainType === 'anima' || trainType === 'qwen21') ? 'weighted' : (trainType === 'zimage' || trainType === 'flux') ? 'sigmoid' : null);   // miroir de _DEFAULT_TIMESTEP
+  const advTimestepDefault = adv?.default_timestep_type ?? (trainType === 'krea' ? 'linear' : (trainType === 'flux2klein' || trainType === 'anima' || trainType === 'qwen21') ? 'weighted' : (trainType === 'zimage' || trainType === 'flux' || trainType === 'moss') ? 'sigmoid' : null);   // miroir de _DEFAULT_TIMESTEP (moss = la run vérifiée omettait la clé → défaut ai-toolkit sigmoid)
   const advTimestepSupported = adv ? adv.timestep_type_supported !== false : trainType !== 'sdxl';
   const advTimestepChoices = adv?.timestep_type_choices ?? ['sigmoid', 'linear', 'weighted', 'shift'];
   const advOptimizer = adv?.optimizer ?? 'adamw8bit';
@@ -1314,6 +1321,9 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
     : 0;
   // A batch bigger than the dataset means some steps see the same image twice
   // in one pass, which is not what anyone means by "batch 64 on 30 images".
+  const fzEpochsN = Number(otEpochsDraft !== '' ? otEpochsDraft : (adv?.epochs ?? ''))
+    || FIZGIG_DEFAULT_EPOCHS;
+  const fzDerivedSteps = keptCount > 0 ? fzEpochsN * keptCount : 0;
   const otBatchWarning = (otBatchN > keptCount && keptCount > 0)
     ? `Batch ${otBatchN} is larger than the ${keptCount} images in this dataset — every step would see the whole set.`
     : '';
@@ -2652,6 +2662,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
           <option value="flux2klein">FLUX.2 Klein (~20 img)</option>
           <option value="anima">Anima (~20 img)</option>
           <option value="qwen21">Qwen 2.1 (~20 img)</option>
+          <option value="moss">MOSS-Image (~20 img)</option>
         </select>
         <div role="radiogroup" aria-label="Training mode"
           aria-describedby={[
@@ -3151,7 +3162,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                 aria-label="Base model"
                 className="px-2 py-1 rounded-lg bg-surface-raised text-content text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary max-w-[230px]">
                 {(currentBases.length ? currentBases
-                  : [{ value: '', label: trainType === 'sdxl' ? (comfyConfigured ? 'No SDXL checkpoint found' : 'ComfyUI not configured') : trainType === 'krea' ? 'Official — Krea 2' : trainType === 'flux' ? 'Official — FLUX.1-dev' : trainType === 'flux2klein' ? 'Official — FLUX.2 Klein' : trainType === 'anima' ? 'Official — Anima' : trainType === 'qwen21' ? (comfyConfigured ? 'No Qwen-Image 2.1 checkpoint found' : 'ComfyUI not configured') : 'Official — Z-Image-Turbo' }]).map((b) => (
+                  : [{ value: '', label: trainType === 'sdxl' ? (comfyConfigured ? 'No SDXL checkpoint found' : 'ComfyUI not configured') : trainType === 'krea' ? 'Official — Krea 2' : trainType === 'flux' ? 'Official — FLUX.1-dev' : trainType === 'flux2klein' ? 'Official — FLUX.2 Klein' : trainType === 'anima' ? 'Official — Anima' : trainType === 'moss' ? 'Official — MOSS-Image-Base' : trainType === 'qwen21' ? (comfyConfigured ? 'No Qwen-Image 2.1 checkpoint found' : 'ComfyUI not configured') : 'Official — Z-Image-Turbo' }]).map((b) => (
                   <option key={b.value} value={b.value}>
                     {trainType === 'zimage' && !b.value ? 'Official recipe — selected by variant' : b.label}{b.value && baseInfo?.converted?.[b.value] ? ' ✓' : ''}{baseOptionSuffix(b)}
                   </option>
@@ -3188,16 +3199,20 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                   <option value="turbo">Turbo (w/ adapter)</option>
                 </select>
               )}
-              {/* Local trainer — Krea 2 only in this slice. ai-toolkit stays the
-                  default everywhere; OneTrainer needs its own folder set in Settings. */}
-              {trainType === 'krea' && (
+              {/* Local trainer. ai-toolkit stays the default everywhere;
+                  OneTrainer (Krea 2) and Fizgig (MOSS-Image) each need their
+                  own folder set in Settings. */}
+              {(trainType === 'krea' || trainType === 'moss') && (
                 <select value={trainer} onChange={(e) => setTrainer(e.target.value)}
                   disabled={status.in_progress}
                   aria-label="Local trainer to use for this run"
-                  title="ai-toolkit (default) or OneTrainer (Krea 2 only, needs its own folder set in Settings)"
+                  title={trainType === 'moss'
+                    ? "ai-toolkit (default) or Fizgig (its MOSS-Image Standard preset; needs its own folder set in Settings)"
+                    : "ai-toolkit (default) or OneTrainer (Krea 2 only, needs its own folder set in Settings)"}
                   className="px-2 py-1 rounded-lg bg-surface-raised text-content text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50">
                   <option value="ai_toolkit">ai-toolkit</option>
-                  <option value="onetrainer">OneTrainer</option>
+                  {trainType === 'krea' && <option value="onetrainer">OneTrainer</option>}
+                  {trainType === 'moss' && <option value="fizgig">Fizgig</option>}
                 </select>
               )}
               {/* FLUX.2 Klein : deux TAILLES de base (pas une histoire de distillation
@@ -3287,7 +3302,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                 apporte que du bruit. Krea EN A une depuis que les checkpoints
                 installés sont proposés : sans ComfyUI pointé, la liste se réduit
                 à la base officielle et le dire vaut mieux que la laisser vide. */}
-            {!comfyConfigured && trainType !== 'flux2klein' && trainType !== 'anima' && (
+            {!comfyConfigured && trainType !== 'flux2klein' && trainType !== 'anima' && trainType !== 'moss' && (
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-amber-700 text-[0.625rem]">
                   ⚠️ ComfyUI folder not set — training bases can't be listed{trainType === 'sdxl' ? '' : trainType === 'krea' ? ' (the official Krea 2 base still works)' : trainType === 'qwen21' ? ' (Qwen 2.1 has no downloadable base — its weights are local files)' : ' (the official Z-Image base still works)'}.
@@ -3600,6 +3615,29 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                   : `adaptive · ${typeLabel} / ${checkpointVariantLabel(trainType, variant)} (${keptCount} img)`}</span>
             </label>
           )}
+          {/* Fizgig counts EPOCHS too, and runs its MOSS-Image Standard preset:
+              rank/alpha/learning rate come from the panel, everything else is
+              the preset's. Empty = the preset's 70 epochs; the step label is
+              derived (batch 1, so one epoch = one pass over the kept images). */}
+          {trainer === 'fizgig' && !status.in_progress && (
+            <div className="flex items-center gap-3 flex-wrap text-content-subtle text-[0.6875rem]">
+              <label className="flex items-center gap-1.5"
+                title="How many times the whole dataset is seen. Fizgig's Standard preset trains 70.">
+                <span className="uppercase text-content-muted text-[0.625rem]">Epochs</span>
+                <input type="number" min={1} max={400} step={1}
+                  value={otEpochsDraft}
+                  onChange={(e) => setOtEpochsDraft(e.target.value)}
+                  onBlur={() => saveOtNumber('epochs', otEpochsDraft)}
+                  placeholder={String(FIZGIG_DEFAULT_EPOCHS)}
+                  aria-label="Fizgig epochs"
+                  className="w-[4.5rem] rounded-lg bg-surface-raised px-1.5 py-0.5 text-content tabular-nums text-[0.75rem] focus:outline-none focus:ring-1 focus:ring-primary" />
+              </label>
+              <span>≈ {fzDerivedSteps} steps · {keptCount} images · the step count above is not used</span>
+              <span className="basis-full">
+                Fizgig Standard: Base int8 · AdamW flat LR · EMA 0.98 · 992² · clean-end 30% · block 22 trained · save + preview every 5 epochs
+              </span>
+            </div>
+          )}
           {/* OneTrainer counts EPOCHS, not steps. For a long time this app hid
               that behind `epochs = ceil(steps / images)` with the batch pinned
               to 1 so the arithmetic held — an approximation its own docstring
@@ -3808,6 +3846,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
               <option value="flux2klein">FLUX.2 Klein</option>
               <option value="anima">Anima</option>
               <option value="qwen21">Qwen 2.1</option>
+              <option value="moss">MOSS-Image</option>
             </select>
             {checkpointBaseOptions.length > 0 ? (
               <select value={checkpointBase} onChange={(event) => setCheckpointBase(event.target.value)}
@@ -4363,7 +4402,7 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
   );
 }
 
-const _FAMILY_LABEL = { zimage: 'Z-Image', krea: 'Krea 2', sdxl: 'SDXL', flux: 'FLUX.1', flux2klein: 'FLUX.2 Klein', anima: 'Anima', qwen21: 'Qwen 2.1' };
+const _FAMILY_LABEL = { zimage: 'Z-Image', krea: 'Krea 2', sdxl: 'SDXL', flux: 'FLUX.1', flux2klein: 'FLUX.2 Klein', anima: 'Anima', qwen21: 'Qwen 2.1', moss: 'MOSS-Image' };
 
 function _fmtDuration(min) {
   if (min == null) return '—';

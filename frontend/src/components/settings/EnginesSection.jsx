@@ -28,6 +28,9 @@ import {
   GLOBAL_PROMPT_PART_FIELDS, SUBJECT_PROMPT_PART_FIELDS, FRAMING_PROMPT_PART_FIELDS,
 } from '../common/promptOverride.js'
 import { SUBJECT_TYPE_LABELS } from '../dataset/subjectTypes.js'
+import {
+  useSamplerOptions, qwen21SchedulerChoices, shiftMode, officialShiftMu, VIGGLE_SCHEDULER,
+} from '../../utils/comfySamplerOptions.js'
 
 const ENGINE_SECRETS = [
   { key: 'GEMINI_API_KEY', label: 'Gemini API key', testTarget: 'gemini', help: 'Powers the Nano Banana engine.' },
@@ -2126,9 +2129,204 @@ function KreaLorasCard({ config, setField }) {
 const QWEN21_REF_RESOLUTIONS = [512, 640, 768, 896, 1024, 1280, 1536, 1792, 2048]
 const QWEN21_STEPS_MIN = 4            // qwen21_edit_helper._steps clamp
 const QWEN21_STEPS_MAX = 60
+const QWEN21_CFG_MIN = 1              // qwen21_edit_helper._cfg clamp
+const QWEN21_CFG_MAX = 10
 const QWEN21_MAX_OUTPUT_MP_MAX = 16   // _max_output_resolution clamp
 const QWEN21_CHARACTER_LORA_SLOTS = 5 // qwen21_edit_helper.CHARACTER_LORA_SLOTS
 const QWEN21_CHARACTER_LORA_DEFAULT = 0.8  // helper _character_loras default
+
+/* Sampler, scheduler (or the viggle turbo sigma node), shift, output size and the
+   SeedVR2 reference restore — every graph knob qwen21_edit_helper reads besides
+   steps/cfg. Names come from the live ComfyUI (custom packs included); offline
+   the fields stay free text. */
+function Qwen21SamplingFields({ q, setField, dflt, reset }) {
+  const opts = useSamplerOptions()
+  const sampler = q.sampler ?? dflt('sampler') ?? 'euler'
+  const scheduler = q.scheduler ?? dflt('scheduler') ?? 'simple'
+  const schedulers = qwen21SchedulerChoices(opts.schedulers, opts.viggle, scheduler)
+  const vs = { ...(dflt('viggle_sigmas') || {}), ...(q.viggle_sigmas || {}) }
+  const setVs = (key, value) => setField('qwen21', 'viggle_sigmas', { ...vs, [key]: value })
+  const shift = q.shift ?? dflt('shift') ?? ''
+  const mode = shiftMode(shift)
+  const unknown = (list, v) => opts.reachable && list.length > 0 && !list.includes(v)
+  return (
+    <>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2 sm:max-w-md">
+        <div>
+          <label htmlFor="qwen21-sampler" className="block text-xs font-medium text-content">Sampler</label>
+          <input id="qwen21-sampler" list="qwen21-sampler-list" value={sampler}
+            onChange={(e) => setField('qwen21', 'sampler', e.target.value.trim())}
+            className={INPUT_CLASS} />
+          <datalist id="qwen21-sampler-list">
+            {opts.samplers.map((s) => <option key={s} value={s} />)}
+          </datalist>
+          {unknown(opts.samplers, sampler) && (
+            <p className="mt-1 text-xs text-amber-700">ComfyUI does not list “{sampler}”.</p>
+          )}
+          <ResetToDefault label="Sampler" section="qwen21" field="sampler" {...reset} />
+        </div>
+        <div>
+          <label htmlFor="qwen21-scheduler" className="block text-xs font-medium text-content">Scheduler</label>
+          <input id="qwen21-scheduler" list="qwen21-scheduler-list" value={scheduler}
+            onChange={(e) => setField('qwen21', 'scheduler', e.target.value.trim())}
+            className={INPUT_CLASS} />
+          <datalist id="qwen21-scheduler-list">
+            {schedulers.map((s) => <option key={s} value={s} />)}
+          </datalist>
+          {unknown(schedulers, scheduler) && (
+            <p className="mt-1 text-xs text-amber-700">ComfyUI does not list “{scheduler}”.</p>
+          )}
+          <ResetToDefault label="Scheduler" section="qwen21" field="scheduler" {...reset} />
+        </div>
+      </div>
+      <HelpText className="mt-1 text-xs text-content-muted sm:max-w-md">
+        Any name your ComfyUI lists, custom packs included (RES4LYF, DPM++ 2M Sharp…).
+        <code className="mx-1">{VIGGLE_SCHEDULER}</code> uses the viggle_turbo.py node’s
+        ViggleTurboSigmasSelect — the turbo-LoRA schedule, which also applies the released
+        resolution shift — sampled through SamplerCustomAdvanced + CFGGuider.
+        {opts.reachable && !opts.viggle && ' (Not loaded in this ComfyUI.)'}
+      </HelpText>
+
+      {scheduler === VIGGLE_SCHEDULER && (
+        <div className="mt-3 rounded-lg border border-border p-2.5 sm:max-w-md">
+          <p className="text-xs font-medium text-content">Viggle turbo sigmas</p>
+          <div className="mt-2 grid gap-2 sm:grid-cols-2">
+            <label className="text-xs text-content-muted">Curve
+              <select value={vs.method ?? 'beta'} onChange={(e) => setVs('method', e.target.value)}
+                className={INPUT_CLASS}>
+                {['beta', 'log', 'linear', 'geometric', 'karras', 'quadratic', 'cosine',
+                  'simple', 'sgm_uniform', 'exponential', 'ddim_uniform', 'normal',
+                  'linear_quadratic', 'kl_optimal'].map((m) => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </label>
+            <label className="text-xs text-content-muted">Nodes
+              <input value={vs.nodes ?? ''} onChange={(e) => setVs('nodes', e.target.value)}
+                className={INPUT_CLASS} />
+            </label>
+            {vs.method === 'beta' && (<>
+              <label className="text-xs text-content-muted">Beta α
+                <input type="number" step={0.05} min={0.05} value={vs.alpha}
+                  onChange={(e) => setVs('alpha', Number(e.target.value))} className={INPUT_CLASS} />
+              </label>
+              <label className="text-xs text-content-muted">Beta β
+                <input type="number" step={0.05} min={0.05} value={vs.beta_param}
+                  onChange={(e) => setVs('beta_param', Number(e.target.value))} className={INPUT_CLASS} />
+              </label>
+            </>)}
+            {vs.method === 'karras' && (
+              <label className="text-xs text-content-muted">rho
+                <input type="number" step={0.5} min={1} value={vs.rho}
+                  onChange={(e) => setVs('rho', Number(e.target.value))} className={INPUT_CLASS} />
+              </label>
+            )}
+            {vs.method === 'quadratic' && (
+              <label className="text-xs text-content-muted">p
+                <input type="number" step={0.25} min={1} value={vs.p}
+                  onChange={(e) => setVs('p', Number(e.target.value))} className={INPUT_CLASS} />
+              </label>
+            )}
+          </div>
+          <HelpText className="mt-1 text-xs text-content-muted">
+            The step count above sets how many sigmas the curve resamples the nodes to.
+            beta 0.6/0.6 = denser at both ends.
+          </HelpText>
+          <ResetToDefault label="Viggle sigmas" section="qwen21" field="viggle_sigmas" {...reset} />
+        </div>
+      )}
+
+      <div className="mt-3 sm:max-w-md">
+        <label htmlFor="qwen21-shift" className="block text-xs font-medium text-content">Shift (mu)</label>
+        <div className="flex gap-2">
+          <select id="qwen21-shift" value={mode}
+            onChange={(e) => setField('qwen21', 'shift',
+              e.target.value === 'default' ? '' : e.target.value === 'official' ? 'official' : '0.9')}
+            className={INPUT_CLASS}>
+            <option value="default">ComfyUI built-in (0.69 at every size)</option>
+            <option value="official">Official — grows with output size</option>
+            <option value="custom">Custom</option>
+          </select>
+          {mode === 'custom' && (
+            <input type="number" step={0.05} min={0} max={5} value={shift} aria-label="Shift mu"
+              onChange={(e) => setField('qwen21', 'shift', e.target.value)}
+              className={`${INPUT_CLASS} w-24`} />
+          )}
+        </div>
+        <HelpText className="mt-1 text-xs text-content-muted">
+          Official ≈ {officialShiftMu(1024, 1024).toFixed(2)} at 1 MP, {officialShiftMu(1440, 1440).toFixed(2)} at 2 MP,
+          {' '}{officialShiftMu(2048, 2048).toFixed(2)} at 4 MP (ComfyUI issue #16447). Ignored by
+          the {VIGGLE_SCHEDULER} scheduler, which shifts its own sigmas.
+        </HelpText>
+        <ResetToDefault label="Shift" section="qwen21" field="shift" {...reset} />
+      </div>
+
+      <div className="mt-3 grid gap-3 sm:grid-cols-2 sm:max-w-md">
+        <div>
+          <label htmlFor="qwen21-output-mp" className="block text-xs font-medium text-content">
+            Output size (MP)
+          </label>
+          <input id="qwen21-output-mp" type="number" min={0} max={4} step={0.1}
+            value={q.output_mp ?? dflt('output_mp')}
+            onChange={(e) => setField('qwen21', 'output_mp', Number(e.target.value) || 0)}
+            className={INPUT_CLASS} />
+          <HelpText className="mt-1 text-xs text-content-muted">
+            0 = the reference’s size at the reference resolution. Higher gives full-body
+            shots bigger faces (a ~100 px face gets redrawn as someone slightly different).
+          </HelpText>
+          <ResetToDefault label="Output size" section="qwen21" field="output_mp" {...reset} />
+        </div>
+        <div>
+          <label htmlFor="qwen21-ref-upscale" className="block text-xs font-medium text-content">
+            Restore reference (SeedVR2 ×)
+          </label>
+          <input id="qwen21-ref-upscale" type="number" min={0} max={4} step={0.5}
+            value={q.ref_upscale ?? dflt('ref_upscale')}
+            onChange={(e) => setField('qwen21', 'ref_upscale', Number(e.target.value) || 0)}
+            className={INPUT_CLASS} />
+          <HelpText className="mt-1 text-xs text-content-muted">
+            0 = off. 2 = one-step SeedVR2 restore of the reference at 2× before it is
+            encoded (uses the SeedVR2 lane’s DiT + VAE; adds time and VRAM per shot).
+          </HelpText>
+          <ResetToDefault label="Reference restore" section="qwen21" field="ref_upscale" {...reset} />
+        </div>
+      </div>
+
+      <label className="mt-3 flex items-start gap-2 text-xs text-content sm:max-w-md">
+        <input type="checkbox" className="mt-0.5"
+          checked={q.follow_shot_aspect ?? dflt('follow_shot_aspect') ?? true}
+          onChange={(e) => setField('qwen21', 'follow_shot_aspect', e.target.checked)} />
+        <span>
+          Canvas follows the shot card’s aspect
+          <span className="block text-content-muted">
+            A full-body card gets a portrait canvas, a wide card a landscape one, at the
+            output size above. Off = the reference photo’s own shape, which fights any
+            prompt that reframes the shot.
+          </span>
+        </span>
+      </label>
+
+      <div className="mt-3 sm:max-w-md">
+        <p className="text-xs font-medium text-content">Aspect per framing (W:H)</p>
+        <div className="mt-1 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {[['face', 'Head'], ['bust', 'Half body'], ['body', 'Full body'], ['back', 'Back view']].map(([key, label]) => {
+            const map = { ...(dflt('aspect_by_framing') || {}), ...(q.aspect_by_framing || {}) }
+            return (
+              <label key={key} className="text-xs text-content-muted">{label}
+                <input value={map[key]} placeholder="card's own"
+                  onChange={(e) => setField('qwen21', 'aspect_by_framing', { ...map, [key]: e.target.value.trim() })}
+                  className={INPUT_CLASS} />
+              </label>
+            )
+          })}
+        </div>
+        <HelpText className="mt-1 text-xs text-content-muted">
+          Used when the canvas follows the shot. A value here wins over a card’s own aspect
+          (e.g. a 16:9 wide full-body card renders at the full-body ratio); blank = the card’s own.
+        </HelpText>
+        <ResetToDefault label="Aspect per framing" section="qwen21" field="aspect_by_framing" {...reset} />
+      </div>
+    </>
+  )
+}
 
 function Qwen21Card({ config, setField, configDefaults, caps }) {
   const q = config.qwen21 || {}
@@ -2207,12 +2405,37 @@ function Qwen21Card({ config, setField, configDefaults, caps }) {
           className={INPUT_CLASS}
         />
         <HelpText className="mt-1 text-xs text-content-muted">
-          {dflt('steps')} = the measured working profile (euler/simple at cfg 4.0,
-          both pinned in code). {QWEN21_STEPS_MIN}–{QWEN21_STEPS_MAX}; more steps = slower,
-          usually cleaner.
+          {dflt('steps')} = the measured working profile for the stock base (euler/simple,
+          sampler pinned in code). {QWEN21_STEPS_MIN}–{QWEN21_STEPS_MAX}; more steps = slower,
+          usually cleaner. A turbo build or turbo LoRA wants its own step count (e.g. 6 or 4).
         </HelpText>
         <ResetToDefault label="Sampler steps" section="qwen21" field="steps" {...reset} />
       </div>
+
+      <div className="mt-3 sm:max-w-xs">
+        <label htmlFor="qwen21-cfg" className="block text-xs font-medium text-content">
+          CFG
+        </label>
+        <input
+          id="qwen21-cfg"
+          type="number"
+          min={QWEN21_CFG_MIN}
+          max={QWEN21_CFG_MAX}
+          step={0.1}
+          value={q.cfg ?? dflt('cfg')}
+          onChange={(e) => setField('qwen21', 'cfg',
+            e.target.value === '' ? dflt('cfg') : Number(e.target.value))}
+          className={INPUT_CLASS}
+        />
+        <HelpText className="mt-1 text-xs text-content-muted">
+          {dflt('cfg')} suits the stock 2.1 base at 30 steps. Turbo LoRAs run low (1–1.5);
+          at 1.0 the negative prompt is ignored and each step costs half.
+          {' '}{QWEN21_CFG_MIN}–{QWEN21_CFG_MAX}.
+        </HelpText>
+        <ResetToDefault label="CFG" section="qwen21" field="cfg" {...reset} />
+      </div>
+
+      <Qwen21SamplingFields q={q} setField={setField} dflt={dflt} reset={reset} />
 
       <div className="mt-3 sm:max-w-xs">
         <label htmlFor="qwen21-max-output-mp" className="block text-xs font-medium text-content">
